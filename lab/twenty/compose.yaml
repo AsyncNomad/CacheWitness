@@ -1,0 +1,23 @@
+# Phase 1 lab for Twenty CRM's integration tests. Twenty's .env.test
+# hardcodes localhost:5432 (db "test", postgres/postgres) and localhost:6379,
+# so stop the Phase 0 lab before starting this one.
+name: cw-twenty
+services:
+  pg:
+    image: postgres:16
+    command: ["postgres", "-c", "wal_level=logical", "-c", "track_commit_timestamp=on", "-c", "max_connections=300"]
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: test
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "test"]
+      interval: 1s
+      retries: 30
+  redis:
+    image: redis:7.2
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      retries: 30

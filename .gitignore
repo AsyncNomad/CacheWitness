@@ -4,3 +4,4 @@ lab/out/
 *.jsonl
 truth.json
 natural_oracle.json
+__pycache__/
