@@ -51,7 +51,7 @@ In particular, **even the standard "DEL after commit" pattern is not safe.** Thi
 
 ### 1. Configuration
 
-CacheWitness reads `cachewitness.yaml` at the project root, which declares **how cache keys map to database tables, and your consistency policy**. The only change in your application is **the Redis URL**.
+CacheWitness reads `cawit.yaml` at the project root (the CLI is `cawit`), which declares **how cache keys map to database tables, and your consistency policy**. The only change in your application is **the Redis URL**.
 
 ```yaml
 policy:
@@ -88,7 +88,7 @@ Keys that cannot be mapped (list or aggregate caches) are listed separately as *
 
 ```bash
 # Check wal_level, replication privileges, publication, Redis version, and permission to enable keyspace notifications
-cachewitness doctor --pg $DATABASE_URL --redis redis://localhost:6379
+cawit doctor --pg $DATABASE_URL --redis redis://localhost:6379
 ```
 
 > "No code changes" means **no application code changes**. The database needs `wal_level=logical`, a replication privilege, and a publication. CacheWitness only uses temporary replication slots.
@@ -99,10 +99,10 @@ CacheWitness has two modes with different purposes.
 
 ```bash
 # check mode: wrap existing tests and check for deterministic bugs (missing/failed invalidation, wrong keys, ...)
-cachewitness check --config cachewitness.yaml -- npm run test:integration
+cawit check --config cawit.yaml -- npm run test:integration
 
 # race mode: wrap a concurrent load and widen race windows to check for race conditions
-cachewitness race --config cachewitness.yaml --amplify stale-set --seed 42 -- k6 run load.js
+cawit race --config cawit.yaml --amplify stale-set --seed 42 -- k6 run load.js
 ```
 
 The result is one of **PASS (exit code 0) / FAIL (1) / INCONCLUSIVE (2)**. If too many writes to mapped keys could not be observed (writes that bypass the proxy, unsupported commands, ...), CacheWitness does not call the run "clean"; it reports INCONCLUSIVE. A confirmed violation is always a FAIL, regardless of coverage.

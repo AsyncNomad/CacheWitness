@@ -51,7 +51,7 @@
 
 ### 1. 설정 (Configuration)
 
-CacheWitness는 프로젝트 루트의 `cachewitness.yaml` 파일로 **캐시 키와 DB 테이블의 대응 관계, 그리고 여러분의 정합성 정책**을 선언합니다. 앱에서 바꾸는 것은 **Redis URL 하나**뿐입니다.
+CacheWitness는 프로젝트 루트의 `cawit.yaml` 파일로(CLI 명령은 `cawit`) **캐시 키와 DB 테이블의 대응 관계, 그리고 여러분의 정합성 정책**을 선언합니다. 앱에서 바꾸는 것은 **Redis URL 하나**뿐입니다.
 
 ```yaml
 policy:
@@ -88,7 +88,7 @@ report:
 
 ```bash
 # wal_level, 복제 권한, publication, Redis 버전, keyspace 알림 설정 권한을 점검
-cachewitness doctor --pg $DATABASE_URL --redis redis://localhost:6379
+cawit doctor --pg $DATABASE_URL --redis redis://localhost:6379
 ```
 
 > “무수정”은 **앱 코드 무수정**이라는 뜻입니다. DB에는 `wal_level=logical`, 복제 권한, publication이 필요하며, CacheWitness는 임시 복제 슬롯만 사용합니다.
@@ -99,10 +99,10 @@ CacheWitness에는 목적이 다른 두 가지 모드가 있습니다.
 
 ```bash
 # check 모드: 기존 테스트를 감싸 결정적 버그(무효화 누락·실패, 잘못된 키 등)를 검사
-cachewitness check --config cachewitness.yaml -- npm run test:integration
+cawit check --config cawit.yaml -- npm run test:integration
 
 # race 모드: 동시 부하를 감싸고 경쟁 창을 넓혀 경쟁 조건을 검사
-cachewitness race --config cachewitness.yaml --amplify stale-set --seed 42 -- k6 run load.js
+cawit race --config cawit.yaml --amplify stale-set --seed 42 -- k6 run load.js
 ```
 
 결과는 **PASS(종료 코드 0) / FAIL(1) / INCONCLUSIVE(2)** 중 하나입니다. 매핑된 키에 대한 쓰기 중 관측하지 못한 것(프록시를 우회한 쓰기, 미지원 명령 등)이 기준보다 많으면 “정상”이라고 말하지 않고 INCONCLUSIVE를 냅니다. 확정된 위반은 관측 비율과 상관없이 항상 FAIL입니다.

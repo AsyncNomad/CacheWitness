@@ -39,6 +39,19 @@
 - **하지 않는 것**: 운영 환경 상시 감시(별도 후속 제품으로 분리), 캐시 자동 수정, 캐시 대체.
 - **기간**: 관문 6개, 약 37주 + 여유분. 매 관문에서 중단·전환 여부를 다시 판단한다 (13장).
 
+**이름 체계** (ripgrep이 명령어로 `rg`를 쓰는 것과 같은 방식)
+
+| 용도 | 이름 |
+|---|---|
+| 프로젝트, 저장소, README 제목 | CacheWitness |
+| CLI 명령, 바이너리 | `cawit` |
+| crate | `cawit`, 내부 크레이트는 `cawit-*` (8.2) |
+| npm 패키지 (바이너리 배포용) | `cawit` |
+| 설정 파일 | `cawit.yaml` |
+| 환경 변수 | `CAWIT_*` |
+
+2026-10-15 기준 `cawit`과 `cachewitness`는 crates.io와 npm에서 비어 있고, `cawit`은 PyPI와 Homebrew에도 없다. **GitHub의 `cawit`은 다른 사람의 개인 계정이 이미 쓰고 있다** (2011년 생성, 공개 저장소 0개). 그래서 GitHub Action은 `cawit/action`으로 둘 수 없고, 조직을 만든다면 `cachewitness`를 쓴다.
+
 ---
 
 ## 2. 주제와 동기
@@ -236,8 +249,8 @@ t4  conn A  SET k v1
 
 | 모드 | 명령 | 무엇을 잡는가 | 전제 조건 | 단계 |
 |---|---|---|---|---|
-| **check** | `cachewitness check -- <테스트 명령>` | 결정적 버그: 무효화 누락·실패, 부분 무효화, write-through 순서 역전, 롤백된 쓰기의 잔존, 부정 캐시 잔존 | 테스트가 실제로 커밋해야 한다 | v0.1 |
-| **race** | `cachewitness race --amplify stale-set --seed 42 -- <부하 명령>` | 경쟁 조건: 구버전 SET, 커밋 전 무효화, 무효화 실패 후 미회복 | 같은 키에 동시 읽기·쓰기를 만드는 워크로드 (k6, wrk, 자체 스크립트) | v0.3 |
+| **check** | `cawit check -- <테스트 명령>` | 결정적 버그: 무효화 누락·실패, 부분 무효화, write-through 순서 역전, 롤백된 쓰기의 잔존, 부정 캐시 잔존 | 테스트가 실제로 커밋해야 한다 | v0.1 |
+| **race** | `cawit race --amplify stale-set --seed 42 -- <부하 명령>` | 경쟁 조건: 구버전 SET, 커밋 전 무효화, 무효화 실패 후 미회복 | 같은 키에 동시 읽기·쓰기를 만드는 워크로드 (k6, wrk, 자체 스크립트) | v0.3 |
 | **instrumented** | 선택적 계측 훅 또는 테스트 하네스 동기화 지점 | race 모드의 가설을 `CONFIRMED`로 올림 (SQL 읽기 시각, 읽기 대상, 요청 ID) | 앱이나 테스트에 계측을 추가 | v1 이후 |
 | 운영 감시 | — | 신선도 SLO | — | 별도 후속 제품 |
 
@@ -289,16 +302,16 @@ graph TD
 
 | 크레이트 | 책임 | 확장 경계 |
 |---|---|---|
-| `cw-resp` | RESP2/3 증분 파서 | — |
-| `cw-observer` | 중계, 요청·응답 짝짓기, 명령 실행 결과 판정 | `CommandInterpreter` 레지스트리: 명령별로 영향받는 키와 결과를 해석. 새 명령은 등록만 한다 |
-| `cw-feed` | DB 변경 수집 | `ChangeFeed` 트레이트: PostgreSQL 구현, 이후 MySQL 구현 |
-| `cw-decode` | 캐시 값을 필드로 디코딩 | `ValueDecoder` 레지스트리: JSON 구현, 이후 pickle, Marshal, msgpack, WASM |
-| `cw-mapping` | 키 템플릿 ↔ 행, 필드 ↔ 컬럼 | — |
-| `cw-store` | 키별 이벤트·버전 보관, 메모리 상한 | — |
-| `cw-judge` | 사실 판정, 원인 가설 | `CauseRule` 레지스트리: 규칙마다 필요한 증거, 확정 조건, 가설 조건을 선언 |
-| `cw-amplify` | 지연·거부 주입, 결정 기록 | `Perturbation` 트레이트 |
-| `cw-report` | 터미널, JSONL, JUnit | `ReportSink` 트레이트, 값 가림 정책은 공통 계층에서 적용 |
-| `cachewitness` | CLI, 설정, 조립 | — |
+| `cawit-resp` | RESP2/3 증분 파서 | — |
+| `cawit-observer` | 중계, 요청·응답 짝짓기, 명령 실행 결과 판정 | `CommandInterpreter` 레지스트리: 명령별로 영향받는 키와 결과를 해석. 새 명령은 등록만 한다 |
+| `cawit-feed` | DB 변경 수집 | `ChangeFeed` 트레이트: PostgreSQL 구현, 이후 MySQL 구현 |
+| `cawit-decode` | 캐시 값을 필드로 디코딩 | `ValueDecoder` 레지스트리: JSON 구현, 이후 pickle, Marshal, msgpack, WASM |
+| `cawit-mapping` | 키 템플릿 ↔ 행, 필드 ↔ 컬럼 | — |
+| `cawit-store` | 키별 이벤트·버전 보관, 메모리 상한 | — |
+| `cawit-judge` | 사실 판정, 원인 가설 | `CauseRule` 레지스트리: 규칙마다 필요한 증거, 확정 조건, 가설 조건을 선언 |
+| `cawit-amplify` | 지연·거부 주입, 결정 기록 | `Perturbation` 트레이트 |
+| `cawit-report` | 터미널, JSONL, JUnit | `ReportSink` 트레이트, 값 가림 정책은 공통 계층에서 적용 |
+| `cawit` | CLI 바이너리, 설정, 조립 | — |
 
 ### 8.3 이벤트 모델
 
@@ -350,7 +363,7 @@ Event {
 - **구현**: upstream `tokio-postgres`(0.7.18 기준)는 복제 프로토콜(CopyBoth)을 지원하지 않는다. 메시지 인코딩은 `postgres-protocol` 크레이트를 쓰고, 복제 연결, CopyBoth 스트림, 상태 보고, pgoutput 디코딩은 직접 구현한다. 일반 쿼리(`doctor`, 시계 추정, 스냅샷 읽기)는 `tokio-postgres`를 쓴다.
 - **진행 표시**: pgoutput keepalive는 WAL 끝 위치와 서버 시각을 함께 보낸다. 그 위치까지 처리를 끝내면 그 서버 시각까지의 커밋은 모두 받은 것이다. 판정이 필요할 때는 즉시 응답 요청 플래그를 붙인 상태 보고로 keepalive를 당긴다.
 - **슬롯**: v0는 **임시 슬롯만** 쓴다. 세션이 끝나면 비정상 종료라도 삭제된다. 실행 중에는 슬롯 지연(보존 중인 WAL 크기)을 감시하고, 상한을 넘으면 관측을 중단한 뒤 결과를 `INCONCLUSIVE`로 낸다. `max_slot_wal_keep_size` 기본값이 -1(무제한)이라는 점을 `doctor`가 알린다.
-- **요구 권한과 설정**: `wal_level=logical`, REPLICATION 권한, publication(테이블 소유 권한 필요). `cachewitness doctor`가 하나씩 확인하고 무엇이 부족한지 알려준다. 그래서 "무수정"은 **앱 코드 무수정**이라는 뜻이고, DB 설정은 바뀔 수 있다고 문서에 명시한다.
+- **요구 권한과 설정**: `wal_level=logical`, REPLICATION 권한, publication(테이블 소유 권한 필요). `cawit doctor`가 하나씩 확인하고 무엇이 부족한지 알려준다. 그래서 "무수정"은 **앱 코드 무수정**이라는 뜻이고, DB 설정은 바뀔 수 있다고 문서에 명시한다.
 - **최초 상태(baseline)**: 기본값은 관찰 시작 시점부터 추적하는 것이다. 이전 버전을 모르는 키는 `UNKNOWN_BASELINE`이다. 옵션으로, 작은 테이블에 한해 슬롯 생성 시 내보낸 스냅샷으로 초기 상태를 읽는다(`baseline: snapshot`). CI는 보통 빈 DB와 빈 Redis로 시작하므로 이 문제의 영향이 작다.
 - **TOAST 미변경 컬럼**: `REPLICA IDENTITY FULL`이 아니면 바뀌지 않은 TOAST 값이 "unchanged"로 온다. 이전 버전이 있으면 병합하고, 없으면 그 필드를 "모름"으로 두고 비교에서 뺀다.
 - **DELETE와 TRUNCATE**: DELETE는 tombstone 버전으로 기록한다. TRUNCATE는 pgoutput의 별도 Truncate 메시지로 오며, 테이블 전체 tombstone으로 처리한다. 행이 삭제됐는데 캐시에 값이 남아 있으면 낡은 상태다.
@@ -396,7 +409,7 @@ report:
 - **v0 디코더는 JSON뿐이다.** Django(pickle), Rails(Marshal), Spring(JDK 직렬화)의 기본 포맷은 읽지 못한다. 1단계 측정 결과로 다음 디코더를 정한다 (13장).
 - **비교 규약**: 정수·소수·날짜·NULL·불리언의 정규화 규칙을 타입별로 문서화한다. 의미가 모호한 필드는 비교에서 빼도록 안내한다.
 - **매핑할 수 없는 키**(목록·집계 캐시)는 보고서에 "미매핑"으로 따로 나열한다.
-- **매핑 제안**: `cachewitness init`이 스키마와 샘플 트래픽으로 초안을 만든다 (v0.2).
+- **매핑 제안**: `cawit init`이 스키마와 샘플 트래픽으로 초안을 만든다 (v0.2).
 
 ### 9.4 버전 식별
 
@@ -541,24 +554,24 @@ FAIL  STALE_STATE  app:user:2128   지속 ≥ 812ms (허용 500ms)   관측: COM
 
 ```bash
 # 환경 점검: wal_level, 권한, publication, Redis 버전, CLIENT NO-TOUCH 지원
-cachewitness doctor --pg $DATABASE_URL --redis redis://localhost:6379
+cawit doctor --pg $DATABASE_URL --redis redis://localhost:6379
 
 # 설정 초안
-cachewitness init --pg $DATABASE_URL --redis redis://localhost:6379
+cawit init --pg $DATABASE_URL --redis redis://localhost:6379
 
 # check 모드: 기존 테스트를 감싸 실행. 결과는 PASS / FAIL / INCONCLUSIVE
-cachewitness check --config cachewitness.yaml -- npm run test:integration
+cawit check --config cawit.yaml -- npm run test:integration
 
 # race 모드: 부하 명령을 감싸고 경쟁 창을 넓힘
-cachewitness race --config cachewitness.yaml --amplify stale-set --seed 42 -- k6 run load.js
+cawit race --config cawit.yaml --amplify stale-set --seed 42 -- k6 run load.js
 
 # 결과 보기
-cachewitness report violations.jsonl
+cawit report violations.jsonl
 ```
 
 - **설치**: `cargo install`, 단일 정적 바이너리(Linux x86_64/arm64, macOS), Docker 이미지. Homebrew는 v1.0.
 - **GitHub Action**: v0.3. 결과는 JUnit과 Job Summary로 남긴다.
-- **docker compose 예제**: 기존 redis 서비스 앞에 cachewitness를 끼워 넣는 형태.
+- **docker compose 예제**: 기존 redis 서비스 앞에 `cawit` 서비스를 끼워 넣는 형태.
 
 ---
 
@@ -630,7 +643,7 @@ v1 이후 검토: mysql_async + binlog 파서, rmp-serde/flate2, serde-pickle, w
 
 ### 2단계 · 관측 엔진 v0.1 (11주)
 
-- `cw-resp`, `cw-observer`(실행 결과 모델, v0 명령 범위), keyspace 알림 교차 검증, `cw-feed`(복제 프로토콜 직접 구현, pgoutput, 임시 슬롯, 지연 감시, Truncate, DB 수명주기·병렬 DB), 시간 구간과 진행 표시 모델, `cw-store`(시간 기준 보관), 사실 판정 계층, 관측 상태, check 모드와 종료 코드, `doctor`, JSONL/JUnit, 값 가림과 HMAC 지문.
+- `cawit-resp`, `cawit-observer`(실행 결과 모델, v0 명령 범위), keyspace 알림 교차 검증, `cawit-feed`(복제 프로토콜 직접 구현, pgoutput, 임시 슬롯, 지연 감시, Truncate, DB 수명주기·병렬 DB), 시간 구간과 진행 표시 모델, `cawit-store`(시간 기준 보관), 사실 판정 계층, 관측 상태, check 모드와 종료 코드, `doctor`, JSONL/JUnit, 값 가림과 HMAC 지문.
 - 8주에서 11주로 늘린 이유: 복제 프로토콜 직접 구현(약 1.5주), keyspace 알림 교차 검증(약 1주), DB 수명주기와 병렬 워커 처리(약 1주). HTML 보고서는 4단계로 그대로 두고, 잘못된 키 원인 판정은 v0에서 뺐다.
 - RESP 파서 퍼징, 클라이언트 5종 × RESP2/3 호환성 테스트.
 - 메모리 모델 문서와 메모리 목표 재설정.
@@ -733,6 +746,8 @@ GitHub 스타와 기여자 수는 홍보 성과로만 추적하고, 계속 여�
 | 검토 의견 "SET 지연은 DB 스냅샷을 제어하지 못하므로 부적절" | 받아들이지 않음 | stale-set 경쟁은 이미 옛 값을 읽은 SET이 늦게 도착해서 생긴다. 스냅샷 제어는 필요 없다. 실제 제약은 head-of-line blocking과 동시 라이터의 필요성이다 |
 | 검토 의견 "임시 슬롯도 비정상 종료 시 위험" | 부분 수용 | 임시 슬롯은 세션 종료 시 삭제된다. 다만 실행 중 지연 상한은 둔다 |
 | 검토 의견 "Cachet을 확인할 수 없음" | 정정 | 저장소가 실재한다 (4.1) |
+| 프로젝트 이름까지 `cawit`으로 변경 | 기각 | 이름만으로 "캐시를 지켜보는 도구"가 전달되는 것이 설득 단계에서 중요하고, "stale cache" 같은 검색어와 이어진다. CLI·crate·npm·설정 파일만 `cawit`을 쓴다 (1장) |
+| 쓰지 않을 `cachewitness` crate·npm 이름을 미리 등록 | 기각 | crates.io 정책은 실제 기능 없이 이름만 잡아 두는 것을 금지한다. 실제로 배포할 패키지 이름만 등록한다 |
 | "모든 쓰기가 프록시를 지난다"는 가정 | keyspace 알림 교차 검증으로 대체 | 우회 쓰기를 탐지할 근거가 없었다 (3차 검토) |
 | 유예 시간 기반 판정 | 진행 표시 기반으로 대체 | 수집이 밀리면 최신 버전을 모르는 채로 판정한다 (3차 검토) |
 | 검토 의견 "관측 완전성 95% 이상이면 PASS" | 수정 수용 | 확정된 위반은 비율과 상관없이 FAIL이다. 비율은 PASS와 INCONCLUSIVE를 가를 때만 쓴다 |

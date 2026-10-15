@@ -51,7 +51,7 @@
 
 ### 1. 配置 (Configuration)
 
-CacheWitness 通过项目根目录下的 `cachewitness.yaml` 声明**缓存键与数据库表的对应关系，以及你的一致性策略**。应用中唯一需要改动的是 **Redis URL**。
+CacheWitness 通过项目根目录下的 `cawit.yaml`（CLI 命令为 `cawit`）声明**缓存键与数据库表的对应关系，以及你的一致性策略**。应用中唯一需要改动的是 **Redis URL**。
 
 ```yaml
 policy:
@@ -88,7 +88,7 @@ report:
 
 ```bash
 # 检查 wal_level、复制权限、publication、Redis 版本以及开启 keyspace 通知的权限
-cachewitness doctor --pg $DATABASE_URL --redis redis://localhost:6379
+cawit doctor --pg $DATABASE_URL --redis redis://localhost:6379
 ```
 
 > “无需修改”指的是**无需修改应用代码**。数据库需要 `wal_level=logical`、复制权限和 publication，CacheWitness 只使用临时复制槽。
@@ -99,10 +99,10 @@ CacheWitness 有两种用途不同的模式。
 
 ```bash
 # check 模式：包裹现有测试，检查确定性缺陷（失效遗漏/失败、删错键等）
-cachewitness check --config cachewitness.yaml -- npm run test:integration
+cawit check --config cawit.yaml -- npm run test:integration
 
 # race 模式：包裹并发负载并放大竞态窗口，检查竞态条件
-cachewitness race --config cachewitness.yaml --amplify stale-set --seed 42 -- k6 run load.js
+cawit race --config cawit.yaml --amplify stale-set --seed 42 -- k6 run load.js
 ```
 
 结果为 **PASS（退出码 0）/ FAIL（1）/ INCONCLUSIVE（2）** 之一。如果针对已映射键的写入中，未能观察到的部分（绕过代理的写入、不支持的命令等）超过阈值，CacheWitness 不会判定为“正常”，而是给出 INCONCLUSIVE。已确认的违规无论覆盖率如何，始终为 FAIL。
