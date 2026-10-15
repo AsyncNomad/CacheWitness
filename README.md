@@ -16,11 +16,11 @@
 
    **CacheWitness** is an open-source Rust developer tool for existing PostgreSQL + Redis applications. Without touching your application code, it **confirms cache consistency violations, shows the evidence of how each one came about, and reproduces race conditions in CI**. In one line: **"It confirms that your cache is holding a wrong value, and shows you the evidence of how it got there."**
 
-   Cache-aside with Redis in front of the database is the default architecture for web backends. But cache inconsistency **fails silently, with no errors and no latency**, so APM and monitoring never see it, and it is usually discovered by customers. Millisecond-scale race conditions are also hard to reconstruct from logs. As a result, most postmortems end with a workaround: "shorten the TTL" or "remove the cache".
+   Cache-aside with Redis in front of the database is the default architecture for web backends. But cache inconsistency **fails silently, with no errors and no latency**, so APM and monitoring never see it, and it is often discovered by customers (9 of 21 public incidents). Millisecond-scale race conditions are also hard to reconstruct from logs. As a result, most postmortems end with a workaround: "shorten the TTL" or "remove the cache".
 
    **CacheWitness solves this by observing a protocol proxy in front of the cache and the database's logical replication stream together.** It determines which committed database version each cached value corresponds to, and shows the events that led to that value as a timeline where every event carries a time interval. What it observed, it confirms; causal links it could not observe, it presents **only as hypotheses**. CacheWitness is built on a clear philosophy: **"Don't replace the cache. Prove whether it is correct right now. And say so when you don't know."**
 
-   Meta (Polaris) and Uber built cache consistency checkers like this in-house. CacheWitness aims to bring **the same capability to your Postgres + Redis, without changing application code**. The first goal is to catch violations in CI and staging, before release.
+   Meta checks cache consistency in-house with Polaris, and Uber measures cache staleness in-house. CacheWitness aims to bring **the same capability to your Postgres + Redis, without changing application code**. The first goal is to catch violations in CI and staging, before release.
 
 ---
 
@@ -35,10 +35,11 @@ Cache inconsistency is **"a state where the database has committed a new value, 
 | Stale-set race | Reader reads old value → writer commits and DELs → reader SETs the old value | Hypothesis |
 | Replica-lag refill | After DEL, a lagging read replica supplies the old value | Hypothesis |
 | Invalidate before commit | DEL before commit → another request refills with the old value | Order confirmed, causation hypothesized |
-| Missing / wrong-key invalidation | The cache is never cleared, or a different key is cleared | Hypothesis |
+| Missing invalidation | A code path that changed the database never clears the cache | Hypothesis |
 | Partial invalidation | Only some of the keys tied to a row are cleared | Confirmed (when tied keys are declared) |
 | Stale negative cache | "Not found" was cached, then the row was INSERTed | Confirmed (when the negative value is declared) |
 | Rolled-back write left in cache | The cache was filled before commit, then the transaction rolled back | Hypothesis |
+| Write-through reordering | An older version's SET arrives after a newer version's SET | Confirmed |
 
 In particular, **even the standard "DEL after commit" pattern is not safe.** This has been known since Facebook's 2013 memcache paper, but there has been no tool that shows whether it **actually happens in your code**.
 
@@ -86,7 +87,7 @@ Keys that cannot be mapped (list or aggregate caches) are listed separately as *
 ### 2. Environment Check (Doctor)
 
 ```bash
-# Check wal_level, replication privileges, publication, and Redis version
+# Check wal_level, replication privileges, publication, Redis version, and permission to enable keyspace notifications
 cachewitness doctor --pg $DATABASE_URL --redis redis://localhost:6379
 ```
 
@@ -104,7 +105,7 @@ cachewitness check --config cachewitness.yaml -- npm run test:integration
 cachewitness race --config cachewitness.yaml --amplify stale-set --seed 42 -- k6 run load.js
 ```
 
-The result is one of **PASS / FAIL / INCONCLUSIVE**. If some writes could not be observed (Lua scripts, unsupported commands, ...), CacheWitness does not call the run "clean"; it reports INCONCLUSIVE.
+The result is one of **PASS (exit code 0) / FAIL (1) / INCONCLUSIVE (2)**. If too many writes to mapped keys could not be observed (writes that bypass the proxy, unsupported commands, ...), CacheWitness does not call the run "clean"; it reports INCONCLUSIVE. A confirmed violation is always a FAIL, regardless of coverage.
 
 > Sequential tests do not create race conditions. Use race mode to check for them. Tests that roll back every test case (such as Django's `TestCase`) never commit, so they cannot be checked; CacheWitness detects this and tells you.
 
@@ -144,6 +145,7 @@ CacheWitness is not a cache. It is **a witness watching your cache**.
 - It relays the Redis protocol (RESP2/RESP3) byte for byte, and feeds only a copy to its parser.
 - It distinguishes **seeing a command** from **the state actually changing** (failed NX, aborted MULTI/EXEC, and so on).
 - It receives database changes, with commit time and LSN, from the PostgreSQL logical replication stream.
+- It finds **writes that bypass the proxy** by reconciling Redis keyspace notifications with the proxy's records. It never assumes that every write goes through the proxy.
 - Its checking connection uses `CLIENT NO-TOUCH`, so observation does not change the cache's eviction behavior.
 
 **Result:**
@@ -158,6 +160,7 @@ So CacheWitness **only claims what it knows.**
 
 - **Evidence model:** a cause starts as `UNKNOWN`, becomes `SUSPECTED` as evidence accumulates, and is `CONFIRMED` only when observation alone proves it
 - **Time intervals:** every event is recorded as a `[t_min, t_max]` interval; when intervals overlap, the order is not decided
+- **Watermarks:** a verdict is made only after both observation channels are known to have caught up to the verdict time
 - **Observation state:** each key records `COMPLETE` / `PARTIAL` / `GAP_DETECTED` and so on; incomplete observation means INCONCLUSIVE
 
 ### 3. Races Are Not Left to Chance (Race Amplifier)
@@ -168,7 +171,8 @@ CacheWitness **widens the race window on purpose.**
 
 - **Stale-set induction:** delays forwarding of the SET on the same key after a GET miss
 - **Invalidation-failure tolerance:** rejects DEL with some probability, then checks whether consistency **recovers**
-- **Seed-based:** injection decisions are fixed by `(seed, key, per-key sequence)`, so the same seed reproduces the same injections
+- **Seed-based:** injection decisions are derived from `(seed, key, per-key sequence)`, so the same seed gives the same decision to the n-th command on the same key. The execution order itself is not reproduced
+- **Delay attribution:** each violation records the delay injected into the commands involved
 
 ### 4. Why Rust
 
@@ -204,6 +208,8 @@ graph TD
     subgraph Process [CacheWitness Process]
         Observer[Cache Observer]
         Feed[Change Feed · pgoutput]
+        Notif[Keyspace Notifications]
+        Decode[Value Decoder]
         Amp[Race Amplifier]
 
         subgraph Core [Witness Core]
@@ -214,21 +220,26 @@ graph TD
 
         Observer -->|commands and outcomes| Store
         Feed -->|committed row versions| Store
+        Notif -->|bypass writes, expiry| Store
+        Decode -->|cache value → fields| Store
         Store --> Checker --> Judge
         Amp -.->|inject delay / rejection| Observer
     end
 
     Observer -->|byte-for-byte relay| Redis[(Redis / Valkey)]
     PG -.->|logical replication stream| Feed
+    Redis -.->|keyspace notifications| Notif
     Checker -.->|direct read with CLIENT NO-TOUCH| Redis
     Judge --> Report[Terminal / JSONL / JUnit]
 ```
 
 1. **Cache Observer:** a Redis protocol proxy. It pairs requests and responses per connection in FIFO order and records the outcome of each command.
 2. **Change Feed:** receives row versions and commit times from the PostgreSQL logical replication stream.
-3. **Evidence Store:** keeps per-key events and versions on a time basis, within a memory limit.
-4. **State Checker:** once the observation grace period after a commit has passed, reads the cache directly and determines the facts.
-5. **Judge:** builds cause hypotheses on top of the facts, and confirms them only when the evidence is sufficient.
+3. **Keyspace Notifications:** a second observation channel that detects writes bypassing the proxy, writes inside scripts, and expiry and eviction.
+4. **Value Decoder:** decodes cached values into fields that can be compared with database columns.
+5. **Evidence Store:** keeps per-key events and versions on a time basis, within a memory limit.
+6. **State Checker:** once the allowed staleness has passed and both watermarks are past that point, reads the cache directly and determines the facts.
+7. **Judge:** builds cause hypotheses on top of the facts, and confirms them only when the evidence is sufficient.
 
 ---
 
@@ -237,11 +248,11 @@ graph TD
 The core hypotheses were checked with a roughly 970-line prototype (a Rust detector plus a Node reproduction harness).
 Environment: 2-core, 7 GB Linux container, PostgreSQL 16, Redis 7.0, node-redis (RESP3), 300 ms grace period.
 
-- **Cache-aside with no injected bugs:** under a load built to provoke races (200 hot keys, 32 workers, read:write about 2.3:1), 41 stale-set races occurred in 20 seconds, **about 1.2 per 1,000 writes**. Most were overwritten by the next write; the 3 that persisted to the end were all detected.
-- **Injected bug tests:** zero false positives across 160 correct-pattern runs and 6,570 background operations.
+- **Cache-aside with no injected bugs:** under a load built to provoke races (200 hot keys, 32 workers, read:write about 2.3:1), a separate oracle found 3 keys still holding stale values after a 20-second run, and the prototype detected all 3. The count of transient races during the run (41) was counted by the tool itself and has not been independently verified.
+- **Injected bug tests:** no false positives were observed on correct patterns and background traffic, but the scenarios were written by the same person, so no accuracy claim is made from this.
 - **Observation cost:** adding a proxy hop is expensive (GET p50 0.28 → 0.74 ms versus direct Redis). The extra cost of the observation logic itself could not be distinguished from a plain relay proxy within measurement noise. Resident memory was 25 MB.
 
-> The injected scenarios and the classification rules were written by the same person, so classification accuracy may be overstated. The next phase re-measures it against independent ground truth. See chapter 5 of [`docs/PLAN.md`](docs/PLAN.md) (Korean) for the detailed interpretation.
+> The proxy adds latency to every command, so measured rates are not production rates. Also, the injected scenarios and the classification rules were written by the same person, so classification accuracy may be overstated. The next phase re-measures it against independent ground truth. See chapter 5 of [`docs/PLAN.md`](docs/PLAN.md) (Korean) for the detailed interpretation.
 
 ---
 
@@ -253,7 +264,8 @@ Environment: 2-core, 7 GB Linux container, PostgreSQL 16, Redis 7.0, node-redis 
 | Cache | Redis, Valkey (single node) | Redis Cluster |
 | Value formats | JSON strings | pickle, Marshal, msgpack, user decoders |
 | Key mapping | 1:1 table declarations, tied keys | Composite keys, list/aggregate caches |
-| Modes | check, race | Optional instrumentation, production monitoring (separate product) |
+| Modes | check, race | Optional instrumentation (OpenTelemetry traces), production monitoring (separate product) |
+| Transport | Plain TCP | TLS (`rediss://`) |
 
 **What CacheWitness does not do:**
 

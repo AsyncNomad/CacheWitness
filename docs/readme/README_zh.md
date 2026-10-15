@@ -16,11 +16,11 @@
 
    **CacheWitness** 是一款面向现有 PostgreSQL + Redis 应用的 Rust 开源开发工具。它无需修改应用代码，就能**确认缓存一致性违规，展示每次违规形成过程的证据，并在 CI 中复现竞态条件**。一句话概括：**“确认缓存中存的是错误的值，并用证据说明它是怎么变成这样的。”**
 
-   在数据库前放一层 Redis 的 cache-aside 架构，是 Web 后端的默认选择。但缓存不一致**没有报错、也没有延迟，只是悄无声息地出错**，因此 APM 和监控都捕捉不到，往往要等到用户反馈才被发现。毫秒级的竞态条件也很难从日志中还原。所以大多数事后复盘都以权宜之计收场：“把 TTL 调短”或者“干脆去掉缓存”。
+   在数据库前放一层 Redis 的 cache-aside 架构，是 Web 后端的默认选择。但缓存不一致**没有报错、也没有延迟，只是悄无声息地出错**，因此 APM 和监控都捕捉不到，很多时候要等到用户反馈才被发现（公开案例 21 起中有 9 起）。毫秒级的竞态条件也很难从日志中还原。所以大多数事后复盘都以权宜之计收场：“把 TTL 调短”或者“干脆去掉缓存”。
 
    **CacheWitness 通过同时观察缓存前的协议代理和数据库的逻辑复制流来解决这个问题。** 它判定缓存中的每个值对应数据库的哪个已提交版本，并以每个事件都带有时间区间的时间线，展示该值写入之前发生的事件。观察到的事实，它予以确认；无法观察到的因果关系，它**只作为假设**提出。CacheWitness 基于一个明确的理念设计：**“不替换缓存。证明缓存此刻是否正确。不知道的，就说不知道。”**
 
-   Meta（Polaris）和 Uber 都在内部自建了这类缓存一致性检查工具。CacheWitness 的目标是**把同样的能力带到你的 Postgres + Redis 上，且无需修改应用代码**。首要目标是在 CI 和预发环境中，于发布前发现违规。
+   Meta 在内部用 Polaris 检查缓存一致性，Uber 也在内部测量缓存的新鲜度。CacheWitness 的目标是**把同样的能力带到你的 Postgres + Redis 上，且无需修改应用代码**。首要目标是在 CI 和预发环境中，于发布前发现违规。
 
 ---
 
@@ -35,10 +35,11 @@
 | stale-set 竞态 | 读者读到旧值 → 写者提交并 DEL → 读者 SET 旧值 | 假设 |
 | 复制延迟回填 | DEL 后从延迟的只读副本读到旧值并回填 | 假设 |
 | 提交前失效 | 提交前 DEL → 其他请求用旧值回填 | 顺序确认，因果为假设 |
-| 失效遗漏 / 删错键 | 没有清除缓存，或清除了别的键 | 假设 |
+| 失效遗漏 | 修改了数据库的某条代码路径没有清除缓存 | 假设 |
 | 部分失效 | 与同一行关联的多个键只清除了一部分 | 确认（声明了关联键时） |
 | 负缓存残留 | 缓存了“不存在”之后，该行被 INSERT | 确认（声明了负缓存值时） |
 | 回滚写入残留 | 提交前已写入缓存，随后事务回滚 | 假设 |
+| write-through 顺序颠倒 | 新版本的 SET 之后，旧版本的 SET 才到达 | 确认 |
 
 尤其是，**即使是“提交后 DEL”这一标准模式也并不安全。** 这一点自 2013 年 Facebook 的 memcache 论文起就已为人所知，但一直没有工具能展示它是否**真的发生在你的代码里**。
 
@@ -86,7 +87,7 @@ report:
 ### 2. 环境检查 (Doctor)
 
 ```bash
-# 检查 wal_level、复制权限、publication 和 Redis 版本
+# 检查 wal_level、复制权限、publication、Redis 版本以及开启 keyspace 通知的权限
 cachewitness doctor --pg $DATABASE_URL --redis redis://localhost:6379
 ```
 
@@ -104,7 +105,7 @@ cachewitness check --config cachewitness.yaml -- npm run test:integration
 cachewitness race --config cachewitness.yaml --amplify stale-set --seed 42 -- k6 run load.js
 ```
 
-结果为 **PASS / FAIL / INCONCLUSIVE** 之一。如果存在未能观察到的写入（Lua 脚本、不支持的命令等），CacheWitness 不会判定为“正常”，而是给出 INCONCLUSIVE。
+结果为 **PASS（退出码 0）/ FAIL（1）/ INCONCLUSIVE（2）** 之一。如果针对已映射键的写入中，未能观察到的部分（绕过代理的写入、不支持的命令等）超过阈值，CacheWitness 不会判定为“正常”，而是给出 INCONCLUSIVE。已确认的违规无论覆盖率如何，始终为 FAIL。
 
 > 顺序执行的测试不会产生竞态条件，请用 race 模式检查竞态。每个测试都回滚的方式（如 Django 的 `TestCase`）没有提交，因此无法检查；CacheWitness 会检测到这种情况并提示你。
 
@@ -144,6 +145,7 @@ CacheWitness 不是缓存，而是**注视着缓存的见证者**。
 - 原样转发 Redis 协议（RESP2/RESP3）的字节，只把副本交给解析器。
 - 区分**看到了命令**与**状态确实发生了变化**（NX 失败、MULTI/EXEC 被取消等）。
 - 从 PostgreSQL 逻辑复制流接收数据库变更，连同提交时间和 LSN。
+- 通过比对 Redis keyspace 通知与代理记录，找出**绕过代理的写入**。从不假设所有写入都经过代理。
 - 检查连接使用 `CLIENT NO-TOUCH`，确保观察本身不会改变缓存的淘汰行为。
 
 **结果：**
@@ -158,6 +160,7 @@ CacheWitness 不是缓存，而是**注视着缓存的见证者**。
 
 - **证据模型：** 原因从 `UNKNOWN` 开始，证据积累后升为 `SUSPECTED`，只有仅凭观察即可证明时才为 `CONFIRMED`
 - **时间区间：** 每个事件都记录为 `[t_min, t_max]` 区间，区间重叠时不确定顺序
+- **进度水位（watermark）：** 只有确认两个观察通道都已追上判定时刻，才进行判定
 - **观察状态：** 每个键记录 `COMPLETE` / `PARTIAL` / `GAP_DETECTED` 等，观察不完整时结果为 INCONCLUSIVE
 
 ### 3. 不把竞态交给运气 (Race Amplifier)
@@ -168,7 +171,8 @@ CacheWitness **会刻意放大竞态窗口。**
 
 - **诱发 stale-set：** 在 GET miss 之后，延迟转发同一键的 SET
 - **失效失败容错：** 按概率拒绝 DEL，并检查一致性是否能**恢复**
-- **基于种子：** 注入决策由 `(种子, 键, 键内序号)` 决定，相同的种子会复现相同的注入
+- **基于种子：** 注入决策由 `(种子, 键, 键内序号)` 决定，相同的种子会对同一键的第 n 条命令作出相同的决策，但不复现执行顺序本身
+- **延迟标注：** 每条违规都会记录相关命令被注入的延迟
 
 ### 4. 为什么选择 Rust
 
@@ -204,6 +208,8 @@ graph TD
     subgraph Process [CacheWitness Process]
         Observer[Cache Observer]
         Feed[Change Feed · pgoutput]
+        Notif[Keyspace Notifications]
+        Decode[Value Decoder]
         Amp[Race Amplifier]
 
         subgraph Core [Witness Core]
@@ -214,21 +220,26 @@ graph TD
 
         Observer -->|命令及执行结果| Store
         Feed -->|已提交的行版本| Store
+        Notif -->|绕过写入·过期检测| Store
+        Decode -->|缓存值 → 字段| Store
         Store --> Checker --> Judge
         Amp -.->|注入延迟·拒绝| Observer
     end
 
     Observer -->|原样转发字节| Redis[(Redis / Valkey)]
     PG -.->|逻辑复制流| Feed
+    Redis -.->|keyspace 通知| Notif
     Checker -.->|CLIENT NO-TOUCH 直接查询| Redis
     Judge --> Report[终端 / JSONL / JUnit]
 ```
 
 1. **Cache Observer：** Redis 协议代理。按连接以 FIFO 顺序配对请求与响应，记录每条命令的执行结果。
 2. **Change Feed：** 从 PostgreSQL 逻辑复制流接收行版本和提交时间。
-3. **Evidence Store：** 按时间保留每个键的事件和版本，并控制在内存上限之内。
-4. **State Checker：** 提交后经过观察宽限时间，直接查询缓存以判定事实。
-5. **Judge：** 在事实判定之上建立原因假设，只有证据充分时才予以确认。
+3. **Keyspace Notifications：** 第二观察通道，用于检测绕过代理的写入、脚本内的写入以及过期和淘汰。
+4. **Value Decoder：** 把缓存值解码为可与数据库列比较的字段。
+5. **Evidence Store：** 按时间保留每个键的事件和版本，并控制在内存上限之内。
+6. **State Checker：** 允许的陈旧时间过去、且两个进度水位都越过该时刻后，直接查询缓存以判定事实。
+7. **Judge：** 在事实判定之上建立原因假设，只有证据充分时才予以确认。
 
 ---
 
@@ -237,11 +248,11 @@ graph TD
 我们用约 970 行的原型（Rust 检测器 + Node 复现测试工具）验证了核心假设。
 环境：2 核、7 GB Linux 容器，PostgreSQL 16，Redis 7.0，node-redis（RESP3），宽限时间 300 ms。
 
-- **未注入缺陷的 cache-aside：** 在为诱发竞态而构造的负载下（200 个热点键、32 个 worker、读写比约 2.3:1），20 秒内发生了 41 次 stale-set 竞态，**约每 1,000 次写入 1.2 次**。大多数被下一次写入覆盖，最终留存的 3 次全部被检测到。
-- **注入缺陷测试：** 在 160 次正常模式运行和 6,570 次后台操作中，误报为 0。
+- **未注入缺陷的 cache-aside：** 在为诱发竞态而构造的负载下（200 个热点键、32 个 worker、读写比约 2.3:1）运行 20 秒后，独立的校验程序发现有 3 个键仍保留着陈旧值，原型全部检测到了。运行期间瞬时竞态的次数（41 次）是工具自己统计的，尚未经过独立验证。
+- **注入缺陷测试：** 在正常模式和后台流量中未观察到误报，但场景出自同一人之手，因此不据此宣称准确率。
 - **观察开销：** 经过一层代理本身的开销很大（与直连 Redis 相比，GET p50 从 0.28 ms 升至 0.74 ms）。观察逻辑本身带来的额外开销，在测量噪声范围内与普通转发代理无法区分。常驻内存为 25 MB。
 
-> 注入场景和分类规则出自同一人之手，因此分类准确率可能被高估。下一阶段将基于独立的标准答案数据重新测量。详细解读请参阅 [`docs/PLAN.md`](../PLAN.md)（韩文）第 5 章。
+> 代理会给每条命令增加延迟，因此测得的发生率并不等于生产环境的发生率。此外，注入场景和分类规则出自同一人之手，因此分类准确率可能被高估。下一阶段将基于独立的标准答案数据重新测量。详细解读请参阅 [`docs/PLAN.md`](../PLAN.md)（韩文）第 5 章。
 
 ---
 
@@ -253,7 +264,8 @@ graph TD
 | 缓存 | Redis、Valkey 单节点 | Redis Cluster |
 | 值格式 | JSON 字符串 | pickle、Marshal、msgpack、用户解码器 |
 | 键映射 | 表 1:1 声明、关联键声明 | 复合键、列表/聚合类缓存 |
-| 模式 | check、race | 可选埋点（instrumented）、生产监控（独立产品） |
+| 模式 | check、race | 可选埋点（instrumented，OpenTelemetry 链路）、生产监控（独立产品） |
+| 传输 | 明文 TCP | TLS（`rediss://`） |
 
 **CacheWitness 不做的事：**
 
