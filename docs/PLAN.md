@@ -601,7 +601,7 @@ v1 이후 검토: mysql_async + binlog 파서, rmp-serde/flate2, serde-pickle, w
 |---|---|---|---|
 | DB | PostgreSQL | PostgreSQL | MySQL (수요 확인 후) |
 | 캐시 | Redis, Valkey 단일 노드 | 동일 | Redis Cluster (호환성 검증 후) |
-| 값 형식 | JSON 문자열 | + 1단계 측정으로 고른 디코더 1종 | Hash, msgpack, gzip, WASM 사용자 디코더 |
+| 값 형식 | JSON 문자열 (JSON 직렬화 생태계, 주로 Node/TS) | + 필요해지면 gzip·zstd 압축 해제 | 단순 pickle(보류), Hash, msgpack, WASM 사용자 디코더 |
 | 키 매핑 | 1:1, 묶인 키 선언 | + 복합 키 | 목록·집계 캐시 (별도 연구) |
 | 모드 | check, race | + 안정화 | instrumented, 운영 감시(별도 제품) |
 | 보고서 | 터미널, JSONL, JUnit | + HTML 타임라인, GitHub Action | Prometheus |
@@ -766,7 +766,7 @@ GitHub 스타와 기여자 수는 홍보 성과로만 추적하고, 계속 여�
 - **Redis 버전 의존**: `CLIENT NO-TOUCH`는 Redis 7.2 이상이며, Valkey는 7.2에서 갈라졌으므로 지원한다. 조건부 SET 옵션(IFEQ 등)의 지원 버전은 확인하지 않았다.
 - **keyspace 알림의 비용**: 알림은 서버 전역 설정이라 매핑되지 않은 키에도 발행된다. race 모드 부하에서 Redis CPU에 미치는 영향을 2단계에서 잰다.
 - **커넥션 풀과 멀티플렉싱의 비중**: 대상 생태계별로 기본 클라이언트가 어느 쪽인지 1단계에서 정리한다.
-- **첫 대상 생태계**: 1단계 결과(`docs/design/phase1-results.md`)에서 JSON을 쓰는 앱은 Node 계열뿐이었고, 통과 조건(3개 중 2개)을 직렬화 포맷 때문에 넘지 못했다. JSON 생태계로 좁힐지, gzip·zstd·단순 pickle 디코더 연쇄를 v0에 넣을지 **결정 필요** (1단계 문서의 권고는 후자).
+- **첫 대상 생태계 (결정됨, 2026-10-15)**: 1단계 결과(`docs/design/phase1-results.md`)는 "매핑 모델 통과, 직렬화 포맷 때문에 불통과"였다. **v0 범위는 JSON 직렬화 생태계(주로 Node/TS)로 한다.** 단순 pickle 디코더는 보류한다(판정 가능해지는 대상이 PostHog 하나이고, 그 테스트는 대부분 롤백 방식이다).
 - **쓰기 출처 구분**: 실제 테스트 스위트(Twenty)는 픽스처가 앱을 거치지 않고 DB를 직접 고친다. 이 쓰기를 앱의 무효화 누락과 구분하지 못하면 check 모드가 오탐을 낸다. 2단계 설계에서 방법을 정한다.
 
 ---
