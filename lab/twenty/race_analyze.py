@@ -30,6 +30,63 @@ WS = "20202020-1c25-4d02-bf25-6aeccf7ea419"
 KEY = f"integration-tests:engine:core-entity:workspace:{WS}"
 
 
+def wilson(k, n, z=1.96):
+    """95% Wilson score interval for k successes in n trials."""
+    if n == 0:
+        return (None, None)
+    ph = k / n
+    d = 1 + z * z / n
+    c = (ph + z * z / (2 * n)) / d
+    h = z * ((ph * (1 - ph) / n + z * z / (4 * n * n)) ** 0.5) / d
+    return (round(max(0.0, c - h), 5), round(min(1.0, c + h), 5))
+
+
+def burst_outcomes(evs, commits, burst, steps, policy_ms=100):
+    """Per burst of `burst` concurrent renames: is the value left in the cache
+    once the burst is over (after its last DEL, before the next burst's first
+    DEL) older than the burst's last committed value? Clock-free: the j-th DEL
+    follows at least j commits, and bursts do not overlap (each waits for all
+    its renames, then pauses)."""
+    pos = {v: i for i, (_, v) in enumerate(commits)}
+    out, dels = [], 0
+    i = 0
+    while i < len(evs):
+        if evs[i][2] == "del":
+            dels += 1
+            if dels % burst == 0:
+                j = i + 1
+                last_set = None
+                while j < len(evs) and evs[j][2] != "del":
+                    if evs[j][2] == "set" and evs[j][3] in pos:
+                        last_set = evs[j]
+                    j += 1
+                last_committed = dels - 1
+                stale = last_set is not None and pos[last_set[3]] < last_committed
+                dur = None
+                if stale:
+                    end_t = evs[j][1] if j < len(evs) else None
+                    dur = round(end_t - last_set[1], 1) if end_t is not None else None
+                    near = any(last_set[1] - 3500 <= st <= (end_t or last_set[1]) + 3500 for st in steps)
+                else:
+                    near = False
+                out.append({"burst": dels // burst, "stale_after_burst": stale,
+                            "commits_behind": (last_committed - pos[last_set[3]]) if stale else 0,
+                            "stale_for_ms": dur, "duration_unreliable": near})
+        i += 1
+    n = len(out)
+    k = sum(o["stale_after_burst"] for o in out)
+    durs = [o["stale_for_ms"] for o in out if o["stale_after_burst"] and o["stale_for_ms"] is not None
+            and not o["duration_unreliable"]]
+    return {
+        "bursts": n, "stale_after_burst": k, "p": round(k / n, 5) if n else None, "wilson95": wilson(k, n),
+        "policy_ms": policy_ms,
+        "policy_violations": sum(1 for o in out if o["stale_after_burst"]
+                                 and (o["stale_for_ms"] is None or o["stale_for_ms"] > policy_ms)),
+        "stale_durations_ms": sorted(durs),
+        "stale_bursts": [o for o in out if o["stale_after_burst"]],
+    }
+
+
 def monitor_events(path):
     """(order, wall ms, kind, version) for the workspace entity keys, in Redis order."""
     rx_line = re.compile(r"^(\d+\.\d+) \[\d+ [^\]]+\] \"(\w+)\"")
@@ -137,6 +194,12 @@ def main(run):
         "final": {"db": final_db, "cache": final_cache, "stale_at_end": final_cache not in (None, final_db)},
         "stale": stale,
     }
+    burst = race.get("cfg", {}).get("burst", 0)
+    if burst:
+        ok = attribution_ok and race["writes_ok"] == race["writes"]
+        summary["bursts"] = burst_outcomes(evs, commits, burst, steps) if ok else {"invalid": "DEL/write/commit counts differ"}
+        manip = run / "manipulation.txt"
+        summary["manipulation"] = manip.read_text().strip() if manip.exists() else None
     json.dump(summary, open(run / "race-analysis.json", "w"), indent=1)
     print(f"writes {summary['writes_ok']}  reads {summary['reads_ok']}  commits {len(commits)}  "
           f"cache SET {len(sets)}  DEL {n_dels}  clock steps {len(steps)}")
@@ -147,6 +210,10 @@ def main(run):
     for s in stale[:20]:
         print("  ", s)
     print("final:", summary["final"])
+    if "bursts" in summary:
+        b = summary["bursts"]
+        print("bursts:", {k: v for k, v in b.items() if k not in ("stale_bursts", "stale_durations_ms")},
+              "manipulation:", summary.get("manipulation"))
 
 
 if __name__ == "__main__":

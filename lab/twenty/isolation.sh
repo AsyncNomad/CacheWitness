@@ -12,8 +12,10 @@ assert_isolated() {
 
 # Run a Node command inside the isolated namespace. npm and nx must not try
 # the network (update checks, cloud cache, telemetry).
+# Set CW_KEEP=1 to keep the container after it exits (to read its logs).
 node_isolated() {
-  docker run --rm --network "$NETNS" -u "$(id -u):$(id -g)" -e HOME=/tmp/h \
+  local rm=(--rm); [ -n "${CW_KEEP:-}" ] && rm=()
+  docker run "${rm[@]}" --network "$NETNS" -u "$(id -u):$(id -g)" -e HOME=/tmp/h \
     -e NODE_ENV=test -e NX_NO_CLOUD=true -e NX_DAEMON=false -e NX_SKIP_NX_CACHE=false \
     -e npm_config_offline=true -e npm_config_update_notifier=false -e NO_UPDATE_NOTIFIER=1 \
     -e DO_NOT_TRACK=1 "$@"

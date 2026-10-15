@@ -1,0 +1,54 @@
+CacheWitness lab patch for Twenty (https://github.com/twentyhq/twenty),
+commit c3ba1401f45dbc35bf5ed3d48c4ddc2e58f2bb15.
+
+LICENSE: This patch modifies Twenty and contains excerpts of Twenty's source
+code, Copyright (c) 2023-present Twenty.com, PBC. Like the code it modifies,
+this patch is licensed under the GNU Affero General Public License v3.0 (see
+LICENSES/AGPL-3.0.txt in the CacheWitness repository, or
+https://www.gnu.org/licenses/agpl-3.0.html). It is NOT covered by the
+Apache-2.0 license of CacheWitness. The lines this patch adds are contributed
+under the same AGPLv3 terms. The patched file is not marked
+"@license Enterprise".
+
+Use: local, network-isolated testing only. Twenty is a trademark of
+Twenty.com, PBC. CacheWitness is not affiliated with or endorsed by Twenty.
+
+Regenerate with lab/make-patch.sh, which keeps this header. git apply ignores
+the text before the first "diff --git" line.
+
+diff --git a/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts b/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
+index e78354be..e2a53c9d 100644
+--- a/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
++++ b/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
+@@ -29,6 +29,15 @@ const MAX_LOCAL_CACHE_ENTRIES = 5_000;
+ const MIN_EVICT_KEYS = 100;
+ 
+ const NOT_FOUND_SENTINEL = '__CORE_ENTITY_NOT_FOUND__';
++
++// CacheWitness lab patch: counts applied refill delays for the manipulation check.
++const cwRefillDelayed = { count: 0 };
++if (Number(process.env.CW_REFILL_DELAY_MS || 0) > 0) {
++  setInterval(() => {
++    // oxlint-disable-next-line no-console
++    console.log(`cw-refill-delay ms=${process.env.CW_REFILL_DELAY_MS} applied=${cwRefillDelayed.count}`);
++  }, 5000).unref();
++}
+ type CacheDataType = CoreEntityCacheDataMap[CoreEntityCacheKeyName];
+ type CacheableValue = CacheDataType | typeof NOT_FOUND_SENTINEL;
+ 
+@@ -181,6 +190,15 @@ export class CoreEntityCacheService implements OnModuleInit {
+   ): Promise<CacheableValue> {
+     const provider = this.getProviderOrThrow(cacheKeyName);
+     const data = await provider.computeForCache(entityId);
++    // CacheWitness lab patch (test only): emulate a slow refill between the DB
++    // read and the cache write. Off unless CW_REFILL_DELAY_MS is set; with
++    // CW_REFILL_JITTER=1 each refill sleeps a uniform random 0..ms instead.
++    const cwRefillDelayMs = Number(process.env.CW_REFILL_DELAY_MS || 0);
++    if (cwRefillDelayMs > 0 && cacheKeyName === 'workspaceEntity') {
++      cwRefillDelayed.count++;
++      const ms = process.env.CW_REFILL_JITTER === '1' ? Math.random() * cwRefillDelayMs : cwRefillDelayMs;
++      await new Promise((resolve) => setTimeout(resolve, ms));
++    }
+     const hash = crypto.randomUUID();
+ 
+     const valueToCache: CacheableValue =
