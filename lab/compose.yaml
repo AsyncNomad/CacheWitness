@@ -1,0 +1,27 @@
+# Phase 0 lab: the environment the prototype was validated against.
+# PostgreSQL 16 with logical decoding, Redis 7.2 with an ACL user that
+# cannot DEL (for the failed-invalidation scenario). Ports bind to
+# localhost because the prototype and harness hardcode them.
+name: cw-lab
+services:
+  pg:
+    image: postgres:16
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10"]
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: app
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["./pg-init:/docker-entrypoint-initdb.d:ro"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "app"]
+      interval: 1s
+      retries: 30
+  redis:
+    image: redis:7.2
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      retries: 30
