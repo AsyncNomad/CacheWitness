@@ -1,7 +1,16 @@
-# Phase 1 lab for Twenty CRM's integration tests. Twenty's .env.test
-# hardcodes localhost:5432 (db "test", postgres/postgres) and localhost:6379,
-# so stop the Phase 0 lab before starting this one.
+# Phase 1 lab for Twenty CRM, isolated from the outside network.
+#
+# Experiments must never send traffic off this machine. PostgreSQL sits only
+# on an internal network (no default route, no published ports), and every
+# other container shares its network namespace: Redis via network_mode here,
+# and the Twenty server, its tests, and the load generator via
+# `--network container:cw-twenty-pg-1`. Inside that namespace Twenty's
+# .env.test addresses (localhost:5432, localhost:6379) work unchanged, and
+# nothing can reach beyond it. Host tools use `docker exec`.
 name: cw-twenty
+networks:
+  isolated:
+    internal: true
 services:
   pg:
     image: postgres:16
@@ -9,14 +18,16 @@ services:
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: test
-    ports: ["127.0.0.1:5432:5432"]
+    networks: [isolated]
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "test"]
       interval: 1s
       retries: 30
   redis:
     image: redis:7.2
-    ports: ["127.0.0.1:6379:6379"]
+    network_mode: "service:pg"
+    depends_on:
+      pg: { condition: service_started }
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 1s
