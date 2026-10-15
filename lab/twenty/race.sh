@@ -13,6 +13,7 @@
 #   REFILL_DELAY_MS  sleep d ms between the DB read and the cache write in
 #                 Twenty's refill path (needs refill-delay.patch applied and built)
 #   JITTER=1      either delay becomes a uniform random 0..d ms per write
+#   REFILL_MODE=block  the code delay busy-waits (stalls the process) instead of sleeping
 # Manipulation check: when a delay is requested, the run fails unless the
 # delay was applied to exactly the refill writes Redis executed.
 set -euo pipefail
@@ -49,8 +50,8 @@ if [ -n "${AMP_DELAY_MS:-}" ]; then
   echo "amplifier: SET/MSET of the workspace entity held ${AMP_DELAY_MS}ms"
 fi
 if [ -n "${REFILL_DELAY_MS:-}" ]; then
-  SERVER_ENV+=(-e CW_REFILL_DELAY_MS="$REFILL_DELAY_MS" -e CW_REFILL_JITTER="${JITTER:-0}")
-  echo "refill delay in Twenty's code: ${REFILL_DELAY_MS}ms"
+  SERVER_ENV+=(-e CW_REFILL_DELAY_MS="$REFILL_DELAY_MS" -e CW_REFILL_JITTER="${JITTER:-0}" -e CW_REFILL_MODE="${REFILL_MODE:-sleep}")
+  echo "refill delay in Twenty's code: ${REFILL_DELAY_MS}ms (${REFILL_MODE:-sleep}, jitter ${JITTER:-0})"
 fi
 if [ -n "${PG_DELAY_MS:-}" ]; then
   # prio qdisc with every band mapped to 1:2, and port-5432 traffic sent to 1:3 (netem).

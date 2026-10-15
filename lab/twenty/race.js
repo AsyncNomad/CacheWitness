@@ -15,6 +15,8 @@
 //   editing the same workspace at once).
 //   BURST=k sends k concurrent renames, waits BURST_PAUSE_MS (2000), repeats:
 //   whatever the cache holds after a burst stays until the next edit.
+//   BURST_PAUSE_JITTER_MS adds a uniform random 0..d ms to each pause (BURST=1
+//   with a pause of seconds models one person saving now and then).
 const fs = require('fs');
 const path = require('path');
 
@@ -25,6 +27,7 @@ const cfg = {
   writers: +(process.env.WRITERS || 1),
   burst: +(process.env.BURST || 0),
   burstPauseMs: +(process.env.BURST_PAUSE_MS || 2000),
+  burstPauseJitterMs: +(process.env.BURST_PAUSE_JITTER_MS || 0),
   seconds: +(process.env.SECONDS || 30),
   writeIntervalMs: +(process.env.WRITE_INTERVAL_MS || 100),
   out: process.env.OUT || '.',
@@ -92,7 +95,7 @@ async function gql(query, variables) {
   const bursts = async () => {
     while (Date.now() < stop) {
       await Promise.all(Array.from({ length: cfg.burst }, rename));
-      await sleep(cfg.burstPauseMs);
+      await sleep(cfg.burstPauseMs + Math.random() * cfg.burstPauseJitterMs);
     }
   };
   const writing = cfg.burst > 0 ? [bursts()] : Array.from({ length: cfg.writers }, writer);

@@ -1,0 +1,13 @@
+# Round 3 (see docs/design/phase1-results.md 5.7). Two servers, readers 50.
+# label            secs  options
+# Matched means: constant d vs uniform 0..2d (measured earlier and replicated below)
+const25            360   REFILL_DELAY_MS=25 JITTER=0 BURST=8 BURST_PAUSE_MS=600
+const50            360   REFILL_DELAY_MS=50 JITTER=0 BURST=8 BURST_PAUSE_MS=600
+# Process-stall baseline: the delay busy-waits and stalls the whole server process
+block-jit50        360   REFILL_DELAY_MS=50 JITTER=1 REFILL_MODE=block BURST=8 BURST_PAUSE_MS=600
+block-jit100       360   REFILL_DELAY_MS=100 JITTER=1 REFILL_MODE=block BURST=8 BURST_PAUSE_MS=600
+# Replicates of the request-level jitter points
+sleep-jit50-r2     360   REFILL_DELAY_MS=50 JITTER=1 BURST=8 BURST_PAUSE_MS=600
+sleep-jit100-r2    360   REFILL_DELAY_MS=100 JITTER=1 BURST=8 BURST_PAUSE_MS=600
+# Realistic: one person saving every 1-3 s while 50 readers use the workspace
+human-jit100       900   REFILL_DELAY_MS=100 JITTER=1 BURST=1 BURST_PAUSE_MS=1000 BURST_PAUSE_JITTER_MS=2000

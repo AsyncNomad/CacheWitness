@@ -17,7 +17,7 @@ Regenerate with lab/make-patch.sh, which keeps this header. git apply ignores
 the text before the first "diff --git" line.
 
 diff --git a/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts b/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
-index e78354be..e2a53c9d 100644
+index e78354be..9ef168bd 100644
 --- a/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
 +++ b/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
 @@ -29,6 +29,15 @@ const MAX_LOCAL_CACHE_ENTRIES = 5_000;
@@ -36,18 +36,27 @@ index e78354be..e2a53c9d 100644
  type CacheDataType = CoreEntityCacheDataMap[CoreEntityCacheKeyName];
  type CacheableValue = CacheDataType | typeof NOT_FOUND_SENTINEL;
  
-@@ -181,6 +190,15 @@ export class CoreEntityCacheService implements OnModuleInit {
+@@ -181,6 +190,24 @@ export class CoreEntityCacheService implements OnModuleInit {
    ): Promise<CacheableValue> {
      const provider = this.getProviderOrThrow(cacheKeyName);
      const data = await provider.computeForCache(entityId);
 +    // CacheWitness lab patch (test only): emulate a slow refill between the DB
 +    // read and the cache write. Off unless CW_REFILL_DELAY_MS is set; with
-+    // CW_REFILL_JITTER=1 each refill sleeps a uniform random 0..ms instead.
++    // CW_REFILL_JITTER=1 each refill waits a uniform random 0..ms instead.
++    // CW_REFILL_MODE=sleep (default) slows only this request; =block busy-waits,
++    // stalling the whole process like a GC pause or a blocked event loop.
 +    const cwRefillDelayMs = Number(process.env.CW_REFILL_DELAY_MS || 0);
 +    if (cwRefillDelayMs > 0 && cacheKeyName === 'workspaceEntity') {
 +      cwRefillDelayed.count++;
 +      const ms = process.env.CW_REFILL_JITTER === '1' ? Math.random() * cwRefillDelayMs : cwRefillDelayMs;
-+      await new Promise((resolve) => setTimeout(resolve, ms));
++      if (process.env.CW_REFILL_MODE === 'block') {
++        const until = Date.now() + ms;
++        while (Date.now() < until) {
++          // busy-wait on purpose
++        }
++      } else {
++        await new Promise((resolve) => setTimeout(resolve, ms));
++      }
 +    }
      const hash = crypto.randomUUID();
  

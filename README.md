@@ -191,6 +191,8 @@ Not because it is "fast", but because of **the conditions a process sitting in t
 - **🧾 Evidence-based verdicts:** reports split into confirmed facts, cause hypotheses, and missing evidence
 - **👥 Stale read counting:** measures not just cache state but how many times stale values were actually read
 - **🎯 Race amplification mode:** reproduce race conditions in CI and fail the build
+
+> **Current limit (measured on Twenty CRM):** detecting stale cache state and reproducing whether a race can happen need no application code changes. **Quantifying how likely a stale value is to persist currently does need a delay hook inside the app's cache refill path.** A proxy that delays cache writes distorts the risk for clients that share one Redis connection per process (up to 10-30x in our measurements). See [`docs/design/phase1-results.md`](docs/design/phase1-results.md) (Korean).
 - **🛡️ Minimal data exposure:** real values are redacted in reports by default
 - **📄 CI-friendly reports:** terminal, JSONL, JUnit XML
 
