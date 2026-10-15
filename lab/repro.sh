@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Reproduce the prototype's validation runs (PLAN 5.1) against the lab.
-# Usage: lab/repro.sh injected|natural [extra env for the harness...]
+# Usage: lab/repro.sh injected|natural|truth [KEY=VALUE env for the harness...]
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-MODE=${1:?injected|natural}; shift || true
+MODE=${1:?injected|natural|truth}; shift || true
 OUT="$ROOT/lab/out/$MODE-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT"
 BIN="$ROOT/spikes/prototype/cachewitness/target/release/cachewitness"
 HARNESS="$ROOT/spikes/prototype/harness"
+[ "$MODE" = truth ] && HARNESS="$ROOT/lab/truth"
 
 # Fresh state: rows back to version 1, empty cache, a new slot with no backlog.
 # Separate -c flags: each runs in its own transaction (slot creation must not follow writes).
@@ -31,6 +32,8 @@ case "$MODE" in
             sleep 1
             (cd "$OUT" && python3 -I "$HARNESS/eval.py" violations.jsonl) | tee "$OUT/eval.out" ;;
   natural)  SCRIPT=natural.js run_node "${@/#/-e}" | tee "$OUT/natural.out"
+            sleep 1 ;;
+  truth)    SCRIPT=run.js run_node -e OUT=/out "${@/#/-e}" | tee "$OUT/truth.out"
             sleep 1 ;;
 esac
 kill $PROXY_PID; wait $PROXY_PID 2>/dev/null || true

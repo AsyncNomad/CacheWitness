@@ -6,7 +6,7 @@ name: cw-lab
 services:
   pg:
     image: postgres:16
-    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10"]
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=10", "-c", "max_wal_senders=10", "-c", "track_commit_timestamp=on"]
     environment:
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_DB: app
@@ -16,6 +16,23 @@ services:
       test: ["CMD", "pg_isready", "-U", "postgres", "-d", "app"]
       interval: 1s
       retries: 30
+  # Started only with `--profile replica`; needs a primary initialized with
+  # pg-init/00-replication-hba.sh (recreate with `down -v` once).
+  pg-replica:
+    image: postgres:16
+    profiles: ["replica"]
+    user: postgres
+    entrypoint: ["/replica/start.sh"]
+    environment:
+      APPLY_DELAY: ${APPLY_DELAY:-50ms}
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: ["./replica:/replica:ro"]
+    depends_on:
+      pg: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "app"]
+      interval: 1s
+      retries: 60
   redis:
     image: redis:7.2
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]

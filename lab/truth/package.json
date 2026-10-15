@@ -1,0 +1,9 @@
+{
+  "name": "cw-truth-harness",
+  "private": true,
+  "description": "Phase 0 ground-truth harness: textbook cache-aside that records what really happened",
+  "dependencies": {
+    "pg": "8.23.1",
+    "redis": "6.3.0"
+  }
+}
