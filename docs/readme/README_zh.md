@@ -262,7 +262,7 @@ graph TD
 |---|---|---|
 | 数据库 | PostgreSQL | MySQL |
 | 缓存 | Redis、Valkey 单节点 | Redis Cluster |
-| 值格式 | JSON 字符串 | pickle、Marshal、msgpack、用户解码器 |
+| 值格式 | JSON、gzip/zstd 解压、简单 pickle（仅基本类型） | Ruby Marshal、整体 pickle 的模型对象、msgpack、用户解码器 |
 | 键映射 | 表 1:1 声明、关联键声明 | 复合键、列表/聚合类缓存 |
 | 模式 | check、race | 可选埋点（instrumented，OpenTelemetry 链路）、生产监控（独立产品） |
 | 传输 | 明文 TCP | TLS（`rediss://`） |

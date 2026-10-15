@@ -156,12 +156,12 @@ mappings:
 
 참고로 n8n(Node/TS)도 JSON이라 읽을 수 있지만, 키가 복합 키이고 Redis 캐시는 큐 모드에서만 쓴다.
 
-**판정: 매핑 모델은 통과, 직렬화 포맷 때문에 불통과.** 계획서 13장의 분기에 따라 다음과 같이 정했다 (2026-10-15).
+**판정: 매핑 모델은 통과, 직렬화 포맷 때문에 불통과.** 계획서 13장의 분기에 따라 다음과 같이 정했다 (2026-10-15, 사용자 결정).
 
-- **v0 범위는 "JSON 직렬화 생태계(주로 Node/TS)"로 명시한다.** 디코더는 `ValueDecoder` 확장 지점으로 남긴다.
-- **단순 pickle 디코더는 보류한다.** 디코더로 판정 가능해지는 대상은 PostHog 하나뿐이다(Medusa는 값을 읽어도 쿼리 결과 캐시라 행·버전을 정할 수 없다). 그런데 PostHog의 테스트는 대부분 롤백 방식이다. 기본 테스트 클래스 `BaseTest`·`APIBaseTest`가 `TestCase`이고, 이를 쓰는 파일이 약 2,680개, 커밋하는 `TransactionTestCase` 계열은 약 230개다. check 모드 결과가 대부분 `INCONCLUSIVE`가 된다. (Redis 레플리카 읽기는 `REDIS_READER_URL` 기본값이 `None`이라 테스트에서는 문제되지 않는다. zstd 압축은 `USE_REDIS_COMPRESSION`이 켜져 있고 512바이트를 넘을 때만 적용된다.)
-- **gzip·zstd 압축 해제는 저렴하지만 지금 이걸로 판정 가능해지는 대상이 없으므로** 필요해질 때 넣는다.
-- 처음 권고("디코더 연쇄를 v0에 넣는다")는 Medusa를 판정 가능한 대상으로 잘못 셌다. 외부 검토에서 지적받아 고쳤다.
+- **v0에 디코더 연쇄를 넣는다: gzip·zstd 압축 해제 + 기본 타입만 다루는 "단순 pickle"** (str·bytes·dict·list·tuple·int·float·bool·None). 모델 객체를 통째로 pickle한 값과 Ruby Marshal은 `UNSUPPORTED`로 보고한다. 예상 비용 약 1주.
+- 디코더로 **판정까지 가능해지는 대상은 PostHog의 team 캐시**다. Medusa는 값을 읽을 수는 있지만 쿼리 결과 캐시라 행·버전을 정할 수 없으므로, 미매핑 키로 보고된다.
+- 알려진 제약: PostHog 테스트는 대부분 롤백 방식이다. 기본 테스트 클래스 `BaseTest`·`APIBaseTest`가 `TestCase`이고, 이를 쓰는 파일이 약 2,680개, 커밋하는 `TransactionTestCase` 계열은 약 230개다. 그래서 check 모드로 PostHog를 볼 때는 커밋하는 테스트나 race 모드(부하)에 의존한다. Redis 레플리카 읽기는 `REDIS_READER_URL` 기본값이 `None`이라 테스트에서는 문제되지 않는다. zstd 압축은 `USE_REDIS_COMPRESSION`이 켜져 있고 512바이트를 넘을 때만 적용된다.
+- 외부 검토는 "단순 pickle은 PostHog 실현 가능성을 하루 점검한 뒤 결정"을 권했다. 롤백 방식 테스트라는 제약을 알고도 넣기로 한 이유는, Python(Django) 생태계를 v0에서 통째로 잃지 않기 위해서다.
 
 **check 모드의 수확이 적을 수 있다.** 잘 관리된 코드베이스(Twenty)에서는 캐시된 행 변경 1,528건 중 1,527건이 바로 무효화됐다. 결정적인 무효화 누락은 드물다. 프로젝트의 핵심 가설("교과서 패턴도 동시성 아래에서 낡은 값을 남긴다")은 아직 실제 앱에서 검증하지 않았으므로, 다음 작업은 Twenty에서의 race 검증이다(5장).
 

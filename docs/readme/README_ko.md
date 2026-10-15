@@ -262,7 +262,7 @@ graph TD
 |---|---|---|
 | DB | PostgreSQL | MySQL |
 | 캐시 | Redis, Valkey 단일 노드 | Redis Cluster |
-| 값 형식 | JSON 문자열 | pickle, Marshal, msgpack, 사용자 디코더 |
+| 값 형식 | JSON, gzip·zstd 압축 해제, 단순 pickle(기본 타입만) | Ruby Marshal, 모델 객체 pickle, msgpack, 사용자 디코더 |
 | 키 매핑 | 테이블 1:1 선언, 묶인 키 선언 | 복합 키, 목록·집계 캐시 |
 | 모드 | check, race | 선택적 계측(instrumented, OpenTelemetry 트레이스), 운영 감시(별도 제품) |
 | 전송 | 평문 TCP | TLS(`rediss://`) |

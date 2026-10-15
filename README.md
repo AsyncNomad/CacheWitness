@@ -262,7 +262,7 @@ Environment: 2-core, 7 GB Linux container, PostgreSQL 16, Redis 7.0, node-redis 
 |---|---|---|
 | Database | PostgreSQL | MySQL |
 | Cache | Redis, Valkey (single node) | Redis Cluster |
-| Value formats | JSON strings | pickle, Marshal, msgpack, user decoders |
+| Value formats | JSON, gzip/zstd decompression, simple pickle (basic types only) | Ruby Marshal, pickled model objects, msgpack, user decoders |
 | Key mapping | 1:1 table declarations, tied keys | Composite keys, list/aggregate caches |
 | Modes | check, race | Optional instrumentation (OpenTelemetry traces), production monitoring (separate product) |
 | Transport | Plain TCP | TLS (`rediss://`) |
