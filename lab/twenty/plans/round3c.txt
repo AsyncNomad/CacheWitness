@@ -1,0 +1,4 @@
+# Round 3c: is the constant-50ms spike real, and how wide is it?
+const50-r2         360   REFILL_DELAY_MS=50 JITTER=0 BURST=8 BURST_PAUSE_MS=600
+const40            360   REFILL_DELAY_MS=40 JITTER=0 BURST=8 BURST_PAUSE_MS=600
+const60            360   REFILL_DELAY_MS=60 JITTER=0 BURST=8 BURST_PAUSE_MS=600

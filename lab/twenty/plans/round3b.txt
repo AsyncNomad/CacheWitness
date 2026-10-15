@@ -1,0 +1,3 @@
+# Round 3b: the constant-delay points (const25 lost its WAL in round 3).
+const25            360   REFILL_DELAY_MS=25 JITTER=0 BURST=8 BURST_PAUSE_MS=600
+const100           360   REFILL_DELAY_MS=100 JITTER=0 BURST=8 BURST_PAUSE_MS=600

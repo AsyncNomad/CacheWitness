@@ -36,6 +36,11 @@ if [ -z "${SKIP_RESET:-}" ]; then
   node_isolated -v "$TWENTY":/w -w /w/packages/twenty-server node:24.16.0-bookworm bash -c \
     "NODE_OPTIONS='--max-old-space-size=8192' npx nx database:reset" > "$OUT/reset.log" 2>&1
 fi
+# The reset can report success while its seed step failed; check the seed itself.
+seeded=$(docker exec cw-twenty-pg-1 psql -qtAU postgres -d test -c "select count(*) from core.workspace where id='$WS'" 2>/dev/null || echo 0)
+if [ "$seeded" != "1" ]; then
+  echo "INVALID seeded workspace $WS missing (see reset.log)" | tee "$OUT/manipulation.txt"; exit 3
+fi
 
 SERVER_ENV=()
 if [ -n "${AMP_DELAY_MS:-}" ]; then
@@ -100,16 +105,25 @@ node_isolated -v "$ROOT/lab/twenty":/h:ro -v "$OUT":/out -w /out \
 sleep 6   # lets the delay counters log once more
 kill $MON 2>/dev/null || true
 
+# Final state: what the cache holds versus what the database committed.
+docker exec cw-twenty-redis-1 redis-cli get "integration-tests:engine:core-entity:workspace:$WS:data" > "$OUT/final-cache.json"
+docker exec cw-twenty-pg-1 psql -qtAU postgres -d test -c "select \"displayName\" from core.workspace where id='$WS'" > "$OUT/final-db.txt"
+docker exec cw-twenty-pg-1 psql -qtAU postgres -d test \
+  -c "select data from pg_logical_slot_get_changes('cw', null, null, 'include-timestamp', 'on')" > "$OUT/wal.log"
+echo "out: $OUT"
 # Manipulation check: the requested delay must have hit every refill write.
 refill_sets=$(grep -cE '"(SET|MSET)" .*engine:core-entity:workspace:[^:"]+:data"' "$OUT/monitor.log" || true)
 check() { echo "$1" > "$OUT/manipulation.txt"; echo "$1"; }
+# Every refill write Redis executed must have been delayed: applied >= observed.
+# Refills before MONITOR started may add a little on top (allow 0.5% + 5).
+within() { [ "$1" -gt 0 ] && [ "$1" -ge "$2" ] && [ "$1" -le $(( $2 + $2 / 200 + 5 )) ]; }
 if [ -n "${AMP_DELAY_MS:-}" ]; then
   docker stop -t 3 cw-twenty-amp > /dev/null 2>&1 || true
   held=$( (docker logs cw-twenty-amp 2>&1 || true) | sed -n 's/.*"held":\([0-9]*\).*/\1/p' | tail -1)
-  if [ "${held:-0}" -gt 0 ] && [ "$held" -eq "$refill_sets" ]; then
+  if within "${held:-0}" "$refill_sets"; then
     check "OK amplifier held=$held refill_sets=$refill_sets"
   else
-    check "INVALID amplifier held=${held:-0} refill_sets=$refill_sets"; exit 3
+    check "INVALID amplifier held=${held:-0} refill_sets=$refill_sets"; INVALID=1
   fi
 fi
 if [ -n "${REFILL_DELAY_MS:-}" ]; then
@@ -118,19 +132,14 @@ if [ -n "${REFILL_DELAY_MS:-}" ]; then
     a=$(docker logs "cw-twenty-server-$i" 2>&1 | sed -n 's/.*cw-refill-delay ms=[0-9]* applied=\([0-9]*\).*/\1/p' | tail -1)
     applied=$((applied + ${a:-0}))
   done
-  if [ "$applied" -gt 0 ] && [ "$applied" -eq "$refill_sets" ]; then
+  if within "$applied" "$refill_sets"; then
     check "OK refill-delay applied=$applied refill_sets=$refill_sets"
   else
-    check "INVALID refill-delay applied=$applied refill_sets=$refill_sets"; exit 3
+    check "INVALID refill-delay applied=$applied refill_sets=$refill_sets"; INVALID=1
   fi
 fi
 if [ -z "${AMP_DELAY_MS:-}${REFILL_DELAY_MS:-}" ]; then
   check "OK baseline refill_sets=$refill_sets"
 fi
-# Final state: what the cache holds versus what the database committed.
-docker exec cw-twenty-redis-1 redis-cli get "integration-tests:engine:core-entity:workspace:$WS:data" > "$OUT/final-cache.json"
-docker exec cw-twenty-pg-1 psql -qtAU postgres -d test -c "select \"displayName\" from core.workspace where id='$WS'" > "$OUT/final-db.txt"
-docker exec cw-twenty-pg-1 psql -qtAU postgres -d test \
-  -c "select data from pg_logical_slot_get_changes('cw', null, null, 'include-timestamp', 'on')" > "$OUT/wal.log"
-echo "out: $OUT"
 echo "final db: $(cat "$OUT/final-db.txt")  final cache: $(python3 -I -c 'import json,sys;d=open(sys.argv[1]).read().strip();print(json.loads(d).get("displayName") if d else None)' "$OUT/final-cache.json")"
+[ -z "${INVALID:-}" ] || exit 3
