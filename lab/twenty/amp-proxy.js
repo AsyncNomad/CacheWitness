@@ -15,7 +15,9 @@ const UPSTREAM = +(process.env.UPSTREAM || 6379);
 const DELAY = +(process.env.AMP_DELAY_MS || 5);
 const JITTER = process.env.AMP_JITTER === '1';
 const KEY_RX = new RegExp(process.env.AMP_KEY_REGEX || 'core-entity:workspace:[^:]+:data$');
-const stats = { conns: 0, commands: 0, held: 0 };
+// queuedMax: most commands waiting at once on one connection; waitMaxMs and
+// waitTotalMs: time commands spent waiting behind held ones (head-of-line).
+const stats = { conns: 0, commands: 0, held: 0, queuedMax: 0, waitMaxMs: 0, waitTotalMs: 0, waited: 0 };
 
 // Parse one RESP request (array of bulk strings) from buf at off.
 // Returns [args, nextOffset] or null if incomplete.
@@ -60,6 +62,7 @@ net.createServer((client) => {
   upstream.pipe(client);
   let pending = Buffer.alloc(0);
   let chain = Promise.resolve();
+  let queued = 0;
   client.on('data', (chunk) => {
     pending = Buffer.concat([pending, chunk]);
     let off = 0;
@@ -71,9 +74,20 @@ net.createServer((client) => {
       stats.commands++;
       const hold = shouldHold(args);
       if (hold) stats.held++;
+      const arrived = Date.now();
+      queued++;
+      if (queued > stats.queuedMax) stats.queuedMax = queued;
       chain = chain.then(async () => {
+        // Time spent behind earlier held commands, before this one's own hold.
+        const waited = Date.now() - arrived;
+        if (waited > 0) {
+          stats.waited++;
+          stats.waitTotalMs += waited;
+          if (waited > stats.waitMaxMs) stats.waitMaxMs = waited;
+        }
         if (hold) await new Promise((res) => setTimeout(res, JITTER ? Math.random() * DELAY : DELAY));
         upstream.write(bytes);
+        queued--;
       });
       off = next;
     }
