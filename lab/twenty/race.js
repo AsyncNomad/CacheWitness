@@ -1,7 +1,8 @@
 // Phase 1 race experiment against a running Twenty server.
 //
 // One admin renames the workspace every WRITE_INTERVAL_MS (displayName
-// "race-<n>", so every cached value names the version it came from) while
+// "race-<base+n>", where base is unique per run, so every cached value names
+// the version it came from and leftovers from earlier runs sort older) while
 // READERS concurrent requests authenticate against the same workspace. Every
 // authenticated request reads the workspace entity cache in the JWT strategy,
 // so readers are what refill the cache after each invalidation.
@@ -9,7 +10,11 @@
 // Env:
 //   SERVERS (http://127.0.0.1:3000)  comma-separated base URLs; requests rotate over them
 //   TOKEN                            admin access token for the workspace
-//   READERS (50)  SECONDS (30)  WRITE_INTERVAL_MS (100)  OUT (.)
+//   READERS (50)  WRITERS (1)  SECONDS (30)  WRITE_INTERVAL_MS (100)  OUT (.)
+//   WRITERS > 1 runs that many renames concurrently (several admins or jobs
+//   editing the same workspace at once).
+//   BURST=k sends k concurrent renames, waits BURST_PAUSE_MS (2000), repeats:
+//   whatever the cache holds after a burst stays until the next edit.
 const fs = require('fs');
 const path = require('path');
 
@@ -17,6 +22,9 @@ const cfg = {
   servers: (process.env.SERVERS || 'http://127.0.0.1:3000').split(','),
   token: process.env.TOKEN,
   readers: +(process.env.READERS || 50),
+  writers: +(process.env.WRITERS || 1),
+  burst: +(process.env.BURST || 0),
+  burstPauseMs: +(process.env.BURST_PAUSE_MS || 2000),
   seconds: +(process.env.SECONDS || 30),
   writeIntervalMs: +(process.env.WRITE_INTERVAL_MS || 100),
   out: process.env.OUT || '.',
@@ -54,27 +62,46 @@ async function gql(query, variables) {
     }
   };
 
+  // Versions keep increasing across runs that skip the database reset.
+  const base = Math.floor(Date.now() / 1000) * 10000;
+  let n = base;
   const writer = async () => {
-    let n = 0;
     while (Date.now() < stop) {
-      n++;
+      const v = ++n;
       const s = Date.now();
       try {
-        await gql('mutation($n: String!) { updateWorkspace(data: { displayName: $n }) { id } }', { n: `race-${n}` });
-        writes.push({ n, s, e: Date.now(), ok: true });
+        await gql('mutation($n: String!) { updateWorkspace(data: { displayName: $n }) { id } }', { n: `race-${v}` });
+        writes.push({ n: v, s, e: Date.now(), ok: true });
       } catch (e) {
-        writes.push({ n, s, e: Date.now(), ok: false, err: String(e.message).slice(0, 200) });
+        writes.push({ n: v, s, e: Date.now(), ok: false, err: String(e.message).slice(0, 200) });
       }
       await sleep(cfg.writeIntervalMs);
     }
   };
 
-  await Promise.all([writer(), ...Array.from({ length: cfg.readers }, reader)]);
+  const rename = async () => {
+    const v = ++n;
+    const s = Date.now();
+    try {
+      await gql('mutation($n: String!) { updateWorkspace(data: { displayName: $n }) { id } }', { n: `race-${v}` });
+      writes.push({ n: v, s, e: Date.now(), ok: true });
+    } catch (e) {
+      writes.push({ n: v, s, e: Date.now(), ok: false, err: String(e.message).slice(0, 200) });
+    }
+  };
+  const bursts = async () => {
+    while (Date.now() < stop) {
+      await Promise.all(Array.from({ length: cfg.burst }, rename));
+      await sleep(cfg.burstPauseMs);
+    }
+  };
+  const writing = cfg.burst > 0 ? [bursts()] : Array.from({ length: cfg.writers }, writer);
+  await Promise.all([...writing, ...Array.from({ length: cfg.readers }, reader)]);
   fs.writeFileSync(path.join(cfg.out, 'writes.json'), JSON.stringify(writes));
   const summary = {
     cfg: { ...cfg, token: undefined },
-    writes: writes.length, writes_ok: writes.filter((w) => w.ok).length,
-    last_written: writes.filter((w) => w.ok).map((w) => `race-${w.n}`).pop(),
+    base, writes: writes.length, writes_ok: writes.filter((w) => w.ok).length,
+
     reads,
   };
   fs.writeFileSync(path.join(cfg.out, 'race.json'), JSON.stringify(summary, null, 1));
