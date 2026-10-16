@@ -116,44 +116,63 @@ struct HttpStep {
     background: Option<String>,
 }
 
+/// A rendered request, ready to send (owned, so it can run in a background task).
+pub struct Prepared {
+    base: String,
+    method: String,
+    path: String,
+    headers: Vec<(String, String)>,
+    body: Option<Vec<u8>>,
+    error_field: Option<String>,
+}
+
+/// Render the named request template for `app` with the run variables plus `extra`.
+pub fn prepare(ctx: &RunCtx<'_>, app: &str, request: &str, extra: &BTreeMap<String, String>) -> Result<Prepared> {
+    let base = ctx.scenario.apps.get(app).with_context(|| format!("unknown app `{app}`"))?.clone();
+    let tpl = ctx.scenario.requests.get(request).with_context(|| format!("unknown request `{request}`"))?;
+    let mut vars = ctx.vars.clone();
+    for (k, v) in extra {
+        vars.insert(k.clone(), render(v, &ctx.vars)?);
+    }
+    let path = render(&tpl.path, &vars)?;
+    let mut headers: Vec<(String, String)> =
+        tpl.headers.iter().map(|(k, v)| Ok((k.clone(), render(v, &vars)?))).collect::<Result<_>>()?;
+    let body = match &tpl.json {
+        Some(j) => {
+            headers.push(("content-type".into(), "application/json".into()));
+            Some(serde_json::to_vec(&render_json(j, &vars)?)?)
+        }
+        None => None,
+    };
+    Ok(Prepared { base, method: tpl.method.clone(), path, headers, body, error_field: tpl.error_field.clone() })
+}
+
+impl Prepared {
+    /// Send it; HTTP errors and `error_field` in the body are errors.
+    pub async fn send(self) -> Result<http::Response> {
+        let Prepared { base, method, path, headers, body, error_field } = self;
+        let resp = http::request(&base, &method, &path, &headers, body).await?;
+        let text = || String::from_utf8_lossy(&resp.body).chars().take(300).collect::<String>();
+        if resp.status >= 400 {
+            bail!("HTTP {} from {base}{path}: {}", resp.status, text());
+        }
+        if let Some(field) = &error_field {
+            let v: serde_json::Value = serde_json::from_slice(&resp.body).unwrap_or_default();
+            if v.get(field).is_some_and(|e| !e.is_null()) {
+                bail!("`{field}` in response from {base}{path}: {}", text());
+            }
+        }
+        Ok(resp)
+    }
+}
+
 impl Step for HttpStep {
     fn kind(&self) -> &'static str {
         "http"
     }
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>> {
         Box::pin(async move {
-            let base = ctx.scenario.apps.get(&self.app).with_context(|| format!("unknown app `{}`", self.app))?.clone();
-            let tpl = ctx.scenario.requests.get(&self.request).with_context(|| format!("unknown request `{}`", self.request))?;
-            let mut vars = ctx.vars.clone();
-            for (k, v) in &self.vars {
-                vars.insert(k.clone(), render(v, &ctx.vars)?);
-            }
-            let path = render(&tpl.path, &vars)?;
-            let mut headers: Vec<(String, String)> =
-                tpl.headers.iter().map(|(k, v)| Ok((k.clone(), render(v, &vars)?))).collect::<Result<_>>()?;
-            let body = match &tpl.json {
-                Some(j) => {
-                    headers.push(("content-type".into(), "application/json".into()));
-                    Some(serde_json::to_vec(&render_json(j, &vars)?)?)
-                }
-                None => None,
-            };
-            let method = tpl.method.clone();
-            let error_field = tpl.error_field.clone();
-            let fut = async move {
-                let resp = http::request(&base, &method, &path, &headers, body).await?;
-                let text = || String::from_utf8_lossy(&resp.body).chars().take(300).collect::<String>();
-                if resp.status >= 400 {
-                    bail!("HTTP {} from {base}{path}: {}", resp.status, text());
-                }
-                if let Some(field) = &error_field {
-                    let v: serde_json::Value = serde_json::from_slice(&resp.body).unwrap_or_default();
-                    if v.get(field).is_some_and(|e| !e.is_null()) {
-                        bail!("`{field}` in response from {base}{path}: {}", text());
-                    }
-                }
-                Ok(resp)
-            };
+            let fut = prepare(ctx, &self.app, &self.request, &self.vars)?.send();
             match &self.background {
                 Some(name) => {
                     ctx.tasks.insert(name.clone(), tokio::spawn(fut));

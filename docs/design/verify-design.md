@@ -130,11 +130,11 @@ steps:
 
 모든 회차가 훅에 도달했다(`NOT_REACHED` 0). 1단계 `sync.sh` 결과와 같다. 관문 중 Twenty 몫(수정 전 매번 실패, 올바른 수정 매번 통과, 틀린 수정 두 개 판별, 훅 10줄 이내)은 충족했고, 두 번째 Node/TS 대상이 남았다.
 
-## 8. 두 번째 대상 선정 (2026-10-16, 제안)
+## 8. 두 번째 대상: Directus (2026-10-16)
 
 관문은 "Twenty + Node/TS 하나 더"다. 두 번째 대상은 Twenty와 **최대한 다른 캐시 구조**여야 훅·시나리오 형식이 한 앱에 맞춰진 것이 아님을 보일 수 있다.
 
-**제안: Directus** (Express + knex, PostgreSQL, `CACHE_STORE=redis`). 웹 소스 열람으로 확인한 경로(main 브랜치, 아직 고정 커밋 아님):
+**선정: Directus v12.5.0** (`4f77933b`, Express + knex, PostgreSQL, `CACHE_STORE=redis`). 고정 커밋 소스로 확인한 경로:
 
 - 읽기: `api/src/middleware/cache.ts`가 GET 미스면 `next()`로 컨트롤러가 DB를 읽게 하고, `api/src/middleware/respond.ts`가 응답 본문을 `setCacheValue(cache, key, payload, ttl)`로 쓴다. **DB 읽기 → 캐시 쓰기 사이**가 훅 자리다.
 - 무효화: `api/src/services/items.ts`의 create·update·delete가 트랜잭션이 끝난 **뒤** `cache.clear()`(네임스페이스 전체 퍼지, `CACHE_AUTO_PURGE`)를 부른다. 순서는 맞지만 stale-set 경쟁에는 열려 있다: 리더가 옛 행을 읽음 → 라이터 커밋·퍼지 → 리더가 옛 응답을 `CACHE_TTL` 동안 넣어 둠.
@@ -160,7 +160,27 @@ steps:
 | Outline | 문서 cache-aside 경로를 확인하지 못했다 |
 | cache-manager 예제 앱 | 직접 만든 앱은 "실제 앱" 근거가 약하다. 라이브러리 단위 시험은 별도로 둔다 |
 
-**확인 전 가정**: `shouldClearCache` 조건, Redis 저장소의 `clear()`가 여러 인스턴스에서 같은 네임스페이스를 지우는지, 프로세스 안 캐시 유무. 소스를 받은 뒤 확인한다.
+**소스로 확인한 것**
+- `shouldClearCache`: `CACHE_AUTO_PURGE`가 켜져 있고 컬렉션이 무시 목록에 없으면 퍼지한다.
+- 데이터 캐시는 `CACHE_STORE=redis`면 Redis(`@keyv/redis`, 네임스페이스)에만 있다. 프로세스 안 층이 없다(스키마 캐시만 메모리). `clear()`는 네임스페이스 단위라 인스턴스가 여러 대여도 같은 곳을 지운다.
+- 값은 `compress()`로 압축해 저장한다. Redis 값을 직접 읽는 판정은 해독이 필요하므로, 앱을 거쳐 읽는 판정(`app_view`)을 쓴다. 이 압축 형식은 4단계 관측 엔진의 디코더 연쇄 대상이기도 하다.
+- 관리자 정적 토큰 요청도 캐시된다(`permissionsCacheable`은 권한 필터의 `$NOW`만 거른다).
+
+**테스트 패치** (`lab/directus/cawit.patch`, 27줄 추가)
+- 훅: `respond.ts`의 캐시 쓰기 직전 `cawit.syncPoint('refill:after-read', req.path)`. 앱 코드 변경 3줄(주석, import, 호출).
+- 수정 후보 `CW_FIX`:
+  - `ddel`(지연 이중 삭제): 퍼지하고 `CW_DDEL_MS`(500ms) 뒤 한 번 더 퍼지. **그럴듯하지만 틀린 수정**으로 넣었다. 리더가 지연보다 오래 붙잡히면 막지 못한다.
+  - `gen`(세대 번호): 퍼지 전에 세대를 올리고(`INCR`), 미스 때 읽어 둔 세대가 캐시 쓰기 뒤에도 같지 않으면 방금 쓴 값을 지운다. 순서(라이터: 세대 증가 → 퍼지, 리더: 쓰기 → 세대 확인) 덕분에 어느 끼어들기에서도 낡은 값이 남지 않는다.
+- 시나리오(`lab/directus/scenarios/stale-set.yaml`)는 B의 쓰기 뒤 **1초 기다렸다가** A를 푼다. 느린 리더 순서를 시나리오에 적어서 `ddel`을 판별한다. 예상: none FAIL, ddel FAIL, gen PASS.
+
+**코어 변경**
+- `state.cache_key`를 선택으로 바꾸고 `state.app_view{app, request, field(JSON pointer), hit_header, hit_value}`를 추가했다.
+- 판정 `app_equals_db`(앱이 주는 값 = DB)와 `app_cached_equals_db`(그 값이 캐시 적중이기도 함)를 레지스트리에 추가했다.
+- 요청 준비를 `steps::prepare`로 분리해 단계와 판정이 함께 쓴다. HTTP 응답 헤더를 보존한다.
+
+**실험 환경**: `lab/twenty`의 격리 네트워크를 공유한다(같은 PG 인스턴스의 `directus` DB, 같은 Redis, 캐시 네임스페이스 `cawit-lab-directus`).
+
+**상태**: `lab/directus/setup.sh`(네트워크 사용: pnpm 설치·빌드)는 아직 실행하지 않았다. 외부 패키지 설치 스크립트 실행이라 자동 실행 권한이 막혔고, 관리자가 직접 실행한다. 그 뒤 `RESET=1 FIX=none lab/directus/verify.sh ~/code/cw-targets/directus`로 확인한다.
 
 ## 9. 사각지대
 

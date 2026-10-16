@@ -51,15 +51,40 @@ fn post() -> String {
     "POST".into()
 }
 
-/// What the checks compare: one cache entry (optionally one JSON field of it)
-/// and one database value (first column of the first row, cast to text in SQL).
+/// What the checks compare with the database value (first column of the
+/// first row of `db_query`, cast to text in SQL): either one cache entry
+/// (optionally one JSON field of it), or what the application serves
+/// (`app_view`), for caches whose keys are opaque or whose values are encoded.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StateSpec {
-    pub cache_key: String,
+    #[serde(default)]
+    pub cache_key: Option<String>,
     #[serde(default)]
     pub cache_field: Option<String>,
     pub db_query: String,
+    #[serde(default)]
+    pub app_view: Option<AppView>,
+}
+
+/// Read the value through the application: send `request` to `app` and take
+/// the JSON pointer `field` (e.g. `/data/title`) of the response body.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppView {
+    pub app: String,
+    pub request: String,
+    pub field: String,
+    /// Response header that tells whether the cache served the response,
+    /// and the value that means it did (default `HIT`).
+    #[serde(default)]
+    pub hit_header: Option<String>,
+    #[serde(default = "hit")]
+    pub hit_value: String,
+}
+
+fn hit() -> String {
+    "HIT".into()
 }
 
 impl Scenario {

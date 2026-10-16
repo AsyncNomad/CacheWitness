@@ -1,0 +1,106 @@
+CacheWitness lab patch for Directus (https://github.com/directus/directus),
+release v12.5.0, commit 4f77933bf9551cac6b289576078783e189b8f4e3.
+
+LICENSE: This patch modifies Directus and contains excerpts of Directus'
+source code, Copyright 2026 Monospace Inc. Like the code it modifies, this
+patch is licensed under the Monospace Sustainable Core License, Version 1.0
+(MSCL-1.0; see LICENSES/MSCL-1.0.txt in the CacheWitness repository, or the
+"license" file of the Directus repository). It is NOT covered by the
+Apache-2.0 license of CacheWitness. The lines this patch adds are contributed
+under the same MSCL-1.0 terms. It is used for non-commercial research and
+testing, a Permitted Purpose under MSCL-1.0, and touches no license key
+functionality.
+
+Use: local, network-isolated testing only. Directus is a trademark of
+Monospace Inc. CacheWitness is not affiliated with or endorsed by Monospace
+Inc. or Directus.
+
+Regenerate with lab/make-patch.sh, which keeps this header. git apply ignores
+the text before the first "diff --git" line.
+
+diff --git a/api/src/cache.ts b/api/src/cache.ts
+index d237cd1..d98d5e0 100644
+--- a/api/src/cache.ts
++++ b/api/src/cache.ts
+@@ -5,7 +5,7 @@ import Keyv, { type KeyvOptions } from 'keyv';
+ import { useBus } from './bus/index.js';
+ import { useLogger } from './logger/index.js';
+ import { clearCache as clearPermissionCache } from './permissions/cache.js';
+-import { redisConfigAvailable } from './redis/index.js';
++import { redisConfigAvailable, useRedis } from './redis/index.js';
+ import { compress, decompress } from './utils/compress.js';
+ import { freezeSchema, unfreezeSchema } from './utils/freeze-schema.js';
+ import { getConfigFromEnv } from './utils/get-config-from-env.js';
+@@ -61,6 +61,18 @@ export function getCache(): {
+ 		validateEnv(['CACHE_NAMESPACE', 'CACHE_TTL', 'CACHE_STORE']);
+ 		cache = getKeyvInstance(env['CACHE_STORE'] as Store, getMilliseconds(env['CACHE_TTL']));
+ 		cache.on('error', (err) => logger.warn(err, `[cache] ${err}`));
++
++		// CacheWitness lab patch (test only): candidate fixes for the stale-set
++		// race, chosen with CW_FIX. 'ddel' purges again CW_DDEL_MS later (delayed
++		// double delete); 'gen' bumps a generation before purging, and a refill
++		// that started under an older generation drops its write (respond.ts).
++		const cwPurge = cache.clear.bind(cache);
++		cache.clear = async () => {
++			if (process.env['CW_FIX'] === 'gen') await useRedis().incr('cawit-lab:gen');
++			await cwPurge();
++			const ms = Number(process.env['CW_DDEL_MS'] || 500);
++			if (process.env['CW_FIX'] === 'ddel') setTimeout(() => void cwPurge().catch(() => {}), ms).unref();
++		};
+ 	}
+ 
+ 	if (systemCache === null) {
+diff --git a/api/src/middleware/cache.ts b/api/src/middleware/cache.ts
+index a104331..c666411 100644
+--- a/api/src/middleware/cache.ts
++++ b/api/src/middleware/cache.ts
+@@ -9,6 +9,7 @@ import asyncHandler from '../utils/async-handler.js';
+ import { getCacheControlHeader } from '../utils/get-cache-headers.js';
+ import { getCacheKey } from '../utils/get-cache-key.js';
+ import { shouldSkipCache } from '../utils/should-skip-cache.js';
++import { useRedis } from '../redis/index.js';
+ 
+ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next) => {
+ 	const env = useEnv();
+@@ -68,6 +69,8 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
+ 		return res.json(cachedData);
+ 	} else {
+ 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
++		// CacheWitness lab patch (test only), CW_FIX=gen: see respond.ts.
++		if (process.env['CW_FIX'] === 'gen') res.locals['cwGen'] = await useRedis().get('cawit-lab:gen');
+ 		return next();
+ 	}
+ });
+diff --git a/api/src/middleware/respond.ts b/api/src/middleware/respond.ts
+index c3a3d2a..8ce3f7c 100644
+--- a/api/src/middleware/respond.ts
++++ b/api/src/middleware/respond.ts
+@@ -12,6 +12,9 @@ import { getCacheKey } from '../utils/get-cache-key.js';
+ import { getMilliseconds } from '../utils/get-milliseconds.js';
+ import { stringByteSize } from '../utils/get-string-byte-size.js';
+ import { permissionsCacheable } from '../utils/permissions-cacheable.js';
++// CacheWitness sync hook (test only): a no-op unless CAWIT_SYNC_URL is set.
++import * as cawit from 'cawit-hook';
++import { useRedis } from '../redis/index.js';
+ 
+ export const respond: RequestHandler = asyncHandler(async (req, res) => {
+ 	const env = useEnv();
+@@ -53,10 +56,18 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
+ 
+ 	if (shouldCache) {
+ 		const key = await getCacheKey(req);
++		await cawit.syncPoint('refill:after-read', req.path);
+ 
+ 		try {
+ 			await setCacheValue(cacheInstance, key, res.locals['payload'], cacheTTL);
+ 			await setCacheValue(cacheInstance, `${key}__expires_at`, { exp: Date.now() + cacheTTL });
++
++			// CacheWitness lab patch (test only), CW_FIX=gen: a purge since this
++			// request missed bumps the generation; then drop what we just wrote.
++			if (process.env['CW_FIX'] === 'gen' && (await useRedis().get('cawit-lab:gen')) !== res.locals['cwGen']) {
++				await cacheInstance.delete(key);
++				await cacheInstance.delete(`${key}__expires_at`);
++			}
+ 		} catch (err: any) {
+ 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
+ 		}

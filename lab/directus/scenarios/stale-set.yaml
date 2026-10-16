@@ -1,0 +1,51 @@
+# Stale-set race on Directus' response cache (CACHE_STORE=redis,
+# CACHE_AUTO_PURGE=true), forced in the same order every run. Run with
+# lab/directus/verify.sh, which starts two API servers with the cawit-hook
+# enabled and the fix chosen by FIX.
+#
+# Directus caches whole GET responses under hashed, compressed keys, so the
+# verdict reads through the application (state.app_view) and uses the
+# X-Cache-Status header to tell a cache hit from a database read.
+name: directus-stale-set
+runs: 20
+apps:
+  a: http://127.0.0.1:8055
+  b: http://127.0.0.1:8056
+redis: redis://127.0.0.1:6379
+postgres: "host=127.0.0.1 user=postgres password=postgres dbname=directus"
+
+requests:
+  update:
+    method: PATCH
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+    json: { title: "${value}" }
+  read:
+    method: GET
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+
+state:
+  db_query: "select title from articles where id = 1"
+  app_view: { app: a, request: read, field: /data/title, hit_header: x-cache-status }
+
+steps:
+  # 1. write through A: commits and purges the cache
+  - http: { app: a, request: update, vars: { value: "${run}-a" } }
+  - sleep: { ms: 50 }
+  # 2. read through A: it misses, reads the database, and is held before the cache write
+  - arm: { point: "refill:after-read", key: /items/articles/1, as: refill }
+  - http: { app: a, request: read, async: held_read }
+  - reached: { sync: refill, timeout_ms: 10000 }
+  # 3. write a newer value through B: commits and purges
+  - http: { app: b, request: update, vars: { value: "${run}-b" } }
+  # 4. a slow reader: hold A longer than a delayed second purge (CW_DDEL_MS=500)
+  - sleep: { ms: 1000 }
+  # 5. release A, which writes the response it built from the old row
+  - release: { sync: refill }
+  - await: { task: held_read }
+  - sleep: { ms: 100 }
+  # 6. what readers get must be the committed value
+  - expect: { name: not_stale, check: app_equals_db }
+  # 7. a fix must not stop caching: the next read is a cache hit with the current value
+  - expect: { name: refilled, check: app_cached_equals_db }

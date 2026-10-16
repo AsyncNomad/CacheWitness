@@ -9,7 +9,16 @@ use tokio::net::TcpStream;
 #[derive(Debug, Clone)]
 pub struct Response {
     pub status: u16,
+    /// Header names in lower case, in the order received.
+    pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+}
+
+impl Response {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let name = name.to_ascii_lowercase();
+        self.headers.iter().find(|(k, _)| *k == name).map(|(_, v)| v.as_str())
+    }
 }
 
 pub async fn request(base: &str, method: &str, path: &str, headers: &[(String, String)], body: Option<Vec<u8>>) -> Result<Response> {
@@ -40,13 +49,14 @@ fn parse_response(raw: &[u8]) -> Result<Response> {
         .and_then(|l| l.split_whitespace().nth(1))
         .and_then(|s| s.parse().ok())
         .context("bad HTTP status line")?;
-    let chunked = lines.any(|l| {
-        let l = l.to_ascii_lowercase();
-        l.starts_with("transfer-encoding:") && l.contains("chunked")
-    });
+    let headers: Vec<(String, String)> = lines
+        .filter_map(|l| l.split_once(':'))
+        .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .collect();
+    let chunked = headers.iter().any(|(k, v)| k == "transfer-encoding" && v.to_ascii_lowercase().contains("chunked"));
     let rest = &raw[split + 4..];
     let body = if chunked { dechunk(rest)? } else { rest.to_vec() };
-    Ok(Response { status, body })
+    Ok(Response { status, headers, body })
 }
 
 fn dechunk(mut b: &[u8]) -> Result<Vec<u8>> {
@@ -75,6 +85,7 @@ mod tests {
     fn parses_length_and_chunked_bodies() {
         let r = parse_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi").unwrap();
         assert_eq!((r.status, r.body.as_slice()), (200, &b"hi"[..]));
+        assert_eq!(r.header("CONTENT-length"), Some("2"));
         let r = parse_response(b"HTTP/1.1 201 Created\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhe\r\n3\r\nllo\r\n0\r\n\r\n").unwrap();
         assert_eq!((r.status, r.body.as_slice()), (201, &b"hello"[..]));
     }
