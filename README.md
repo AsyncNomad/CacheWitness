@@ -25,11 +25,13 @@
   </a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml"><img src="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<!-- Add after publishing v0.1:
   <a href="https://crates.io/crates/cawit"><img src="https://img.shields.io/crates/v/cawit?logo=rust&label=crates.io" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/cawit-hook"><img src="https://img.shields.io/npm/v/cawit-hook?logo=npm&label=cawit-hook" alt="npm"></a>
   <a href="https://docs.rs/cawit-verify"><img src="https://img.shields.io/docsrs/cawit-verify?logo=docsdotrs&label=docs.rs" alt="docs.rs"></a>
+-->
+<p align="center">
+  <a href="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml"><img src="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
   <img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust 1.85+">
 </p>
