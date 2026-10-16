@@ -1,7 +1,9 @@
 'use strict';
 // CacheWitness sync hook for Node (protocol v1, docs/design/verify-design.md 3).
 //
-// syncPoint(point, key) is a no-op unless CAWIT_SYNC_URL is set. When a
+// syncPoint(point, key) is a no-op unless CAWIT_SYNC_URL is set, and also
+// when NODE_ENV=production unless CAWIT_ALLOW_PRODUCTION=1 (a second guard
+// against a stray CAWIT_SYNC_URL in production). When a
 // scenario has armed `point`, the first call to reach it takes the arm
 // (atomically, so only one call is held), signals cawit:reached:<token>, and waits
 // on cawit:release:<token>. The hook uses its own Redis connection: BLPOP
@@ -9,7 +11,8 @@
 // unrelated commands.
 const net = require('net');
 
-const ENABLED = !!process.env.CAWIT_SYNC_URL;
+const ENABLED = !!process.env.CAWIT_SYNC_URL &&
+  (process.env.NODE_ENV !== 'production' || process.env.CAWIT_ALLOW_PRODUCTION === '1');
 const TIMEOUT_S = Number(process.env.CAWIT_SYNC_TIMEOUT_S || 30);
 let conn = null;
 
@@ -124,4 +127,4 @@ function close() {
   }
 }
 
-module.exports = { syncPoint, close, _parse: parse };
+module.exports = { syncPoint, close, enabled: ENABLED, _parse: parse };

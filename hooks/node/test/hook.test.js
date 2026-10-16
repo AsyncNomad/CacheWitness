@@ -72,4 +72,15 @@ test('key filter: a different key passes and leaves the arm in place', async () 
   r.close();
 });
 
+test('production guard: NODE_ENV=production disables the hook unless allowed', () => {
+  const { execFileSync } = require('child_process');
+  const probe = (env) => execFileSync(process.execPath, ['-e', "process.stdout.write(String(require('..').enabled))"], {
+    cwd: __dirname, env: { PATH: process.env.PATH, CAWIT_SYNC_URL: 'redis://127.0.0.1:1', ...env },
+  }).toString();
+  assert.strictEqual(probe({}), 'true');
+  assert.strictEqual(probe({ NODE_ENV: 'production' }), 'false');
+  assert.strictEqual(probe({ NODE_ENV: 'production', CAWIT_ALLOW_PRODUCTION: '1' }), 'true');
+  assert.strictEqual(probe({ CAWIT_SYNC_URL: '' }), 'false');
+});
+
 test.after(() => hook.close());

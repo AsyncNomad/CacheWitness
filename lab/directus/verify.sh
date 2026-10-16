@@ -43,7 +43,7 @@ cleanup() {
 trap cleanup EXIT
 for i in 0 1; do
   node_isolated -d --name "cw-directus-$i" "${DENV[@]}" -e PORT=$((8055 + i)) -e PUBLIC_URL=http://127.0.0.1:$((8055 + i)) \
-    -e CAWIT_SYNC_URL=redis://127.0.0.1:6379 -e CW_FIX="$FIX" -e CW_DDEL_MS=500 \
+    -e CAWIT_SYNC_URL=redis://127.0.0.1:6379 -e CAWIT_ALLOW_PRODUCTION=1 -e CW_FIX="$FIX" -e CW_DDEL_MS=500 \
     -v "$DX":/w -w /w/api node:22-slim node dist/cli/run.js start > /dev/null
 done
 wait_port 8055; wait_port 8056

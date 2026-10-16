@@ -93,12 +93,12 @@ A hook that was never reached means the race never happened, and a pass would be
 
 ### 3. Judge by state, explain by order
 
-The verdict is simple: does Redis hold what the database committed, and does the cache refill afterwards? When a run fails, CacheWitness explains it with the observed order of events (Redis execution order and PostgreSQL commit order), not with wall-clock timestamps, which proved unreliable in our measurements.
+The verdict is simple: does Redis hold what the database committed, and does the cache refill afterwards? When a run fails, CacheWitness will explain it (planned) with the observed order of events (Redis execution order and PostgreSQL commit order), not with wall-clock timestamps, which proved unreliable in our measurements.
 
 ### 4. Why Rust
 
-- **A single static binary:** drops straight into CI runners.
-- **The observation engine** (Redis protocol proxy, PostgreSQL logical replication reader) needs predictable latency and bounded memory, and parses untrusted traffic.
+- **A single binary, independent of the app's language:** the runner drops into any CI runner without a Node or Python runtime, while hooks stay small per-language libraries.
+- **Honestly, the runner itself would work in any language:** it mostly sends requests and waits on Redis. Rust pays off in the planned observation engine (Redis protocol proxy, PostgreSQL logical replication reader), which needs predictable latency and bounded memory and parses untrusted traffic.
 
 ---
 
@@ -108,7 +108,7 @@ The verdict is simple: does Redis hold what the database committed, and does the
 - **✅ Fix verification:** fails before the fix, passes after it, and checks the cache still refills
 - **🧪 Scenario library:** stale-set, invalidate-before-commit, failed invalidation, replica-lag refill
 - **🔍 Manipulation check:** runs that never reached the hook are discarded
-- **🧾 Explanations from order:** failed runs come with the observed sequence of commits, deletes, and writes
+- **🧾 Explanations from order (planned):** failed runs come with the observed sequence of commits, deletes, and writes. Today a failed run reports what readers got and what the database holds
 - **👀 Secondary: check mode** (no code changes): confirms stale cache state by watching Redis and the PostgreSQL WAL
 
 ---
@@ -123,6 +123,18 @@ All experiments ran locally, with the application lab isolated from the network.
 - **Detection on a real test suite:** 1,527 of 1,528 changes to cached rows were invalidated (median 1.7ms). Stale state was confirmed reliably in our ground-truth runs (157/157), but deterministic invalidation bugs were rare.
 
 These findings are why CacheWitness focuses on forced reproduction and fix verification.
+
+---
+
+## How It Relates to Existing Tools
+
+Stopping code at a named point to force an order is not new. What CacheWitness adds is where the point lives and what it judges.
+
+| Tool | What it does | Difference |
+|---|---|---|
+| RocksDB SyncPoint, fail-rs (TiKV), failpoint (Go) | Sync and fault points compiled into one process | CacheWitness coordinates across processes and servers through Redis, driven by HTTP requests |
+| Lincheck, Fray (JVM), Coyote (.NET) | Explore thread interleavings inside one runtime | CacheWitness works at the request level against a real database and Redis |
+| Jepsen | Black-box consistency testing of distributed databases under faults | CacheWitness targets the application's cache logic, with cache-specific patterns and verdicts |
 
 ---
 
