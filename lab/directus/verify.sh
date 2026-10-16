@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run a cawit verify scenario against two Directus API servers with a chosen fix.
-# Usage: [FIX=none|ddel|gen] [N=20] [RESET=1] [SCENARIO=stale-set] lab/directus/verify.sh <directus checkout>
+# Usage: [FIX=none|ddel|gen|retry] [TTL=5m] [N=20] [RESET=1] [SCENARIO=stale-set] lab/directus/verify.sh <directus checkout>
 # Needs lab/directus/setup.sh (patched and built). Shares the isolated lab
 # network of lab/twenty (same Postgres instance, database `directus`; same
 # Redis). RESET=1 drops and re-bootstraps the database. Exit code is cawit's.
@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 DX=$(cd "${1:?directus checkout}" && pwd)
 FIX=${FIX:-none}; N=${N:-20}; SCENARIO=${SCENARIO:-stale-set}
-OUT="$ROOT/lab/out/directus-$SCENARIO-$FIX-$(date +%Y%m%d-%H%M%S)"
+OUT="$ROOT/lab/out/directus-$SCENARIO-$FIX-ttl${TTL:-5m}-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT"
 TOKEN=cawit-lab-admin-token
 source "$ROOT/lab/twenty/isolation.sh"
@@ -28,7 +28,7 @@ DENV=(-e NODE_ENV=production -e DB_CLIENT=pg -e DB_HOST=127.0.0.1 -e DB_PORT=543
   -e DB_USER=postgres -e DB_PASSWORD=postgres -e SECRET=cawit-lab-secret -e ADMIN_EMAIL=admin@example.com
   -e ADMIN_PASSWORD=cawit-lab -e ADMIN_TOKEN="$TOKEN" -e TELEMETRY=false -e SERVE_APP=false
   -e CACHE_ENABLED=true -e CACHE_STORE=redis -e REDIS=redis://127.0.0.1:6379 -e CACHE_AUTO_PURGE=true
-  -e CACHE_TTL=5m -e CACHE_NAMESPACE=cawit-lab-directus -e CACHE_STATUS_HEADER=X-Cache-Status
+  -e CACHE_TTL="${TTL:-5m}" -e CACHE_NAMESPACE=cawit-lab-directus -e CACHE_STATUS_HEADER=X-Cache-Status
   -e SYNCHRONIZATION_STORE=redis -e MESSENGER_STORE=redis -e RATE_LIMITER_ENABLED=false
   -e EXTENSIONS_PATH=/tmp/ext -e STORAGE_LOCAL_ROOT=/tmp/uploads -e LOG_LEVEL=warn)
 node_isolated "${DENV[@]}" -v "$DX":/w -w /w/api node:22-slim node dist/cli/run.js bootstrap > "$OUT/bootstrap.log" 2>&1 \

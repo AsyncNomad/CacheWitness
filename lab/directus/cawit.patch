@@ -19,31 +19,43 @@ Regenerate with lab/make-patch.sh, which keeps this header. git apply ignores
 the text before the first "diff --git" line.
 
 diff --git a/api/src/cache.ts b/api/src/cache.ts
-index d237cd1..d98d5e0 100644
+index d237cd1..ee8f776 100644
 --- a/api/src/cache.ts
 +++ b/api/src/cache.ts
-@@ -5,7 +5,7 @@ import Keyv, { type KeyvOptions } from 'keyv';
+@@ -5,7 +5,9 @@ import Keyv, { type KeyvOptions } from 'keyv';
  import { useBus } from './bus/index.js';
  import { useLogger } from './logger/index.js';
  import { clearCache as clearPermissionCache } from './permissions/cache.js';
 -import { redisConfigAvailable } from './redis/index.js';
 +import { redisConfigAvailable, useRedis } from './redis/index.js';
++// CacheWitness sync hook (test only): a no-op unless CAWIT_SYNC_URL is set.
++import * as cawit from 'cawit-hook';
  import { compress, decompress } from './utils/compress.js';
  import { freezeSchema, unfreezeSchema } from './utils/freeze-schema.js';
  import { getConfigFromEnv } from './utils/get-config-from-env.js';
-@@ -61,6 +61,18 @@ export function getCache(): {
+@@ -61,6 +63,28 @@ export function getCache(): {
  		validateEnv(['CACHE_NAMESPACE', 'CACHE_TTL', 'CACHE_STORE']);
  		cache = getKeyvInstance(env['CACHE_STORE'] as Store, getMilliseconds(env['CACHE_TTL']));
  		cache.on('error', (err) => logger.warn(err, `[cache] ${err}`));
 +
-+		// CacheWitness lab patch (test only): candidate fixes for the stale-set
-+		// race, chosen with CW_FIX. 'ddel' purges again CW_DDEL_MS later (delayed
-+		// double delete); 'gen' bumps a generation before purging, and a refill
-+		// that started under an older generation drops its write (respond.ts).
++		// CacheWitness lab patch (test only): candidate fixes, chosen with CW_FIX.
++		// Stale-set race: 'ddel' purges again CW_DDEL_MS later (delayed double
++		// delete); 'gen' bumps a generation before purging, and a refill that
++		// started under an older generation drops its write (respond.ts).
++		// Failed invalidation: 'retry' tries the purge once more if it fails.
 +		const cwPurge = cache.clear.bind(cache);
-+		cache.clear = async () => {
++		const cwInvalidate = async () => {
++			await cawit.syncPoint('invalidate:before', 'data');
 +			if (process.env['CW_FIX'] === 'gen') await useRedis().incr('cawit-lab:gen');
 +			await cwPurge();
++		};
++		cache.clear = async () => {
++			try {
++				await cwInvalidate();
++			} catch (err) {
++				if (process.env['CW_FIX'] !== 'retry') throw err;
++				await cwInvalidate();
++			}
 +			const ms = Number(process.env['CW_DDEL_MS'] || 500);
 +			if (process.env['CW_FIX'] === 'ddel') setTimeout(() => void cwPurge().catch(() => {}), ms).unref();
 +		};

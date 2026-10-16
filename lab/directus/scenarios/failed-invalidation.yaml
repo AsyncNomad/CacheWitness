@@ -1,0 +1,31 @@
+# Failed invalidation on Directus: the write commits, but its cache purge
+# fails once (fault injected at the `invalidate:before` hook in cache.ts).
+# Strict verdict: right after the write, readers must get the new value.
+name: directus-failed-invalidation
+runs: 20
+apps:
+  a: http://127.0.0.1:8055
+  b: http://127.0.0.1:8056
+redis: redis://127.0.0.1:6379
+postgres: "host=127.0.0.1 user=postgres password=postgres dbname=directus"
+
+requests:
+  update:
+    method: PATCH
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+    json: { title: "${value}" }
+  read:
+    method: GET
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+
+state:
+  db_query: "select title from articles where id = 1"
+  app_view: { app: a, request: read, field: /data/title, hit_header: x-cache-status }
+
+pattern:
+  failed-invalidation:
+    app: a
+    write: update
+    read: read

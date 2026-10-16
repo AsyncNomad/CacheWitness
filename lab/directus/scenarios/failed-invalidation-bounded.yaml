@@ -1,0 +1,32 @@
+# The failed-invalidation pattern with a bounded-staleness verdict: readers
+# may get the old value for up to 3 s. A short CACHE_TTL passes this verdict
+# and fails the strict one (failed-invalidation.yaml).
+name: directus-failed-invalidation-bounded
+runs: 20
+apps:
+  a: http://127.0.0.1:8055
+  b: http://127.0.0.1:8056
+redis: redis://127.0.0.1:6379
+postgres: "host=127.0.0.1 user=postgres password=postgres dbname=directus"
+
+requests:
+  update:
+    method: PATCH
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+    json: { title: "${value}" }
+  read:
+    method: GET
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+
+state:
+  db_query: "select title from articles where id = 1"
+  app_view: { app: a, request: read, field: /data/title, hit_header: x-cache-status }
+
+pattern:
+  failed-invalidation:
+    app: a
+    write: update
+    read: read
+    within_ms: 3000

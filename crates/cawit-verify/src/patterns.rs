@@ -22,6 +22,7 @@ impl Registry {
     pub fn builtin() -> Registry {
         let mut r = Registry { patterns: HashMap::new() };
         r.register("stale-set", stale_set);
+        r.register("failed-invalidation", failed_invalidation);
         r
     }
 
@@ -167,6 +168,65 @@ fn stale_set(scenario: &Scenario, p: Value) -> Result<Vec<Value>> {
     Ok(steps)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FailedInvalidation {
+    /// App that writes and reads.
+    app: String,
+    write: String,
+    read: String,
+    #[serde(default = "value_var")]
+    value_var: String,
+    /// Sync point placed right before the invalidation; armed to fail.
+    #[serde(default = "before_invalidate")]
+    point: String,
+    #[serde(default)]
+    key: Option<String>,
+    #[serde(default = "hundred")]
+    settle_ms: u64,
+    #[serde(default)]
+    within_ms: Option<u64>,
+    #[serde(default = "ten_seconds")]
+    reached_timeout_ms: u64,
+}
+
+fn before_invalidate() -> String {
+    "invalidate:before".into()
+}
+
+/// Failed invalidation: the write commits but its invalidation fails once
+/// (injected at a sync point armed with action `fail`), so the cache keeps
+/// the old value unless the code retries or otherwise recovers.
+///
+///   1. write `a` and read it, so the cache holds `a`
+///   2. arm the invalidation point to fail, write `b` (the request may fail)
+///   3. `reached` confirms the fault really fired (manipulation check)
+///   4. `not_stale`: readers must get `b`
+///   5. `refilled`: the cache holds `b` again
+fn failed_invalidation(scenario: &Scenario, p: Value) -> Result<Vec<Value>> {
+    let p: FailedInvalidation = params(p)?;
+    let (not_stale, refilled, via_app) = verdict_checks(scenario)?;
+    let mut steps = vec![
+        step("http", &[("app", s(&p.app)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-a"))]),
+        step("http", &[("app", s(&p.app)), ("request", s(&p.read))]),
+        step("sleep", &[("ms", p.settle_ms.into())]),
+        step("arm", &[("point", s(&p.point)), ("key", opt(p.key.as_deref())), ("action", s("fail")), ("as", s("fault"))]),
+        step(
+            "http",
+            &[("app", s(&p.app)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-b")), ("allow_error", true.into())],
+        ),
+        step("reached", &[("sync", s("fault")), ("timeout_ms", p.reached_timeout_ms.into())]),
+        step("sleep", &[("ms", p.settle_ms.into())]),
+        step("expect", &[("name", s("not_stale")), ("check", s(not_stale)), ("within_ms", opt(p.within_ms))]),
+    ];
+    if !via_app {
+        steps.push(step("http", &[("app", s(&p.app)), ("request", s(&p.read))]));
+        steps.push(step("sleep", &[("ms", p.settle_ms.into())]));
+    }
+    steps.push(step("expect", &[("name", s("refilled")), ("check", s(refilled))]));
+    Ok(steps)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +257,19 @@ mod tests {
         let p: Value = serde_yaml::from_str("{ stale-set: { reader: a, writer: b, write: w, read: r, within_ms: 500 } }").unwrap();
         let text = serde_yaml::to_string(&Registry::builtin().expand(&sc, &p).unwrap()).unwrap();
         assert!(text.contains("app_equals_db") && text.contains("app_cached_equals_db") && text.contains("within_ms: 500"));
+    }
+
+    #[test]
+    fn failed_invalidation_arms_a_fault_and_allows_the_write_to_fail() {
+        let sc = scenario("{ db_query: q, app_view: { app: a, request: r, field: /x } }");
+        let p: Value = serde_yaml::from_str("{ failed-invalidation: { app: a, write: w, read: r } }").unwrap();
+        let steps = Registry::builtin().expand(&sc, &p).unwrap();
+        let reg = crate::steps::Registry::builtin();
+        for v in &steps {
+            reg.build(v).unwrap();
+        }
+        let text = serde_yaml::to_string(&steps).unwrap();
+        assert!(text.contains("action: fail") && text.contains("allow_error: true") && text.contains("invalidate:before"));
     }
 
     #[test]
