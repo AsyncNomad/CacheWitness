@@ -1,5 +1,7 @@
 # 소개
 
+<p align="center"><img src="assets/cawit-logo-dark.svg" alt="cawit: cache race verifier" width="420"></p>
+
 **CacheWitness**(CLI: `cawit`)는 PostgreSQL 앞에 Redis 캐시를 둔 애플리케이션을 위한 오픈소스 테스트 도구입니다. **캐시 경쟁을 매번 똑같은 순서로 일으키고, 수정이 그 경쟁을 정말 막는지 CI에서 증명합니다.**
 
 > 경쟁을 기다리지 않는다. 일으키고, 수정을 증명한다.

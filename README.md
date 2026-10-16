@@ -2,6 +2,11 @@
 
 **English** · [简体中文](docs/readme/README_zh.md) · [한국어](docs/readme/README_ko.md)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo/cawit-logo-dark.svg">
+  <img src="docs/assets/logo/cawit-logo-light.svg" alt="cawit: cache race verifier" width="460">
+</picture>
+
 # CacheWitness
 
 **Reproduce cache concurrency bugs on demand, and prove your fix works**

@@ -1,5 +1,7 @@
 # 简介
 
+<p align="center"><img src="assets/cawit-logo-dark.svg" alt="cawit: cache race verifier" width="420"></p>
+
 **CacheWitness**（CLI：`cawit`）是一款开源测试工具，面向在 PostgreSQL 前放置 Redis 缓存的应用。它**让缓存竞态每次都以完全相同的顺序发生，并在 CI 中证明修复确实能阻止它。**
 
 > 不等竞态出现。主动触发它，并证明修复。

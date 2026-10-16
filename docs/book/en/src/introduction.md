@@ -1,5 +1,7 @@
 # Introduction
 
+<p align="center"><img src="assets/cawit-logo-dark.svg" alt="cawit: cache race verifier" width="420"></p>
+
 **CacheWitness** (CLI: `cawit`) is an open-source testing tool for applications that put a Redis cache in front of PostgreSQL. It **makes a cache race happen in exactly the same order on every run, and proves in CI that a fix prevents it.**
 
 > Don't wait for the race. Cause it, and prove the fix.

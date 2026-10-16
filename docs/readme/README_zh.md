@@ -2,6 +2,11 @@
 
 [English](../../README.md) · **简体中文** · [한국어](README_ko.md)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/logo/cawit-logo-dark.svg">
+  <img src="../assets/logo/cawit-logo-light.svg" alt="cawit: cache race verifier" width="460">
+</picture>
+
 # CacheWitness
 
 **按需复现缓存并发缺陷，并证明修复确实有效**

@@ -2,6 +2,11 @@
 
 [English](../../README.md) · [简体中文](README_zh.md) · **한국어**
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/logo/cawit-logo-dark.svg">
+  <img src="../assets/logo/cawit-logo-light.svg" alt="cawit: cache race verifier" width="460">
+</picture>
+
 # CacheWitness
 
 **캐시 동시성 버그를 원할 때 재현하고, 수정이 정말 고쳤는지 증명하는 도구**
