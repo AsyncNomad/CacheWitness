@@ -1,0 +1,20 @@
+CacheWitness lab patch for Directus (https://github.com/directus/directus),
+release v12.5.0, commit 4f77933bf9551cac6b289576078783e189b8f4e3.
+
+LICENSE: This patch modifies Directus and contains excerpts of Directus'
+source code, Copyright 2026 Monospace Inc. Like the code it modifies, this
+patch is licensed under the Monospace Sustainable Core License, Version 1.0
+(MSCL-1.0; see LICENSES/MSCL-1.0.txt in the CacheWitness repository, or the
+"license" file of the Directus repository). It is NOT covered by the
+Apache-2.0 license of CacheWitness. The lines this patch adds are contributed
+under the same MSCL-1.0 terms. It is used for non-commercial research and
+testing, a Permitted Purpose under MSCL-1.0, and touches no license key
+functionality.
+
+Use: local, network-isolated testing only. Directus is a trademark of
+Monospace Inc. CacheWitness is not affiliated with or endorsed by Monospace
+Inc. or Directus.
+
+Regenerate with lab/make-patch.sh, which keeps this header. git apply ignores
+the text before the first "diff --git" line.
+

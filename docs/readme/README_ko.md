@@ -206,4 +206,4 @@ stale-set (20회, 모든 회차가 훅에 도달)
 
 ## 라이선스 (License)
 
-이 프로젝트는 **Apache License 2.0** 하에 배포됩니다.
+이 프로젝트는 **Apache License 2.0** 하에 배포됩니다. 단, 다른 프로젝트(Twenty, Directus)를 수정하는 `lab/`의 실험 패치는 각 프로젝트의 라이선스를 따릅니다. 자세한 내용은 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)를 보십시오. Twenty와 Directus는 각 소유자의 상표이며, CacheWitness는 이들과 제휴하거나 보증받지 않았습니다.

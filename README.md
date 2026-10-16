@@ -206,4 +206,4 @@ This software is provided **"as is", without warranty of any kind**, express or 
 
 ## License
 
-This project is distributed under the **Apache License 2.0**.
+This project is distributed under the **Apache License 2.0**, except for the lab patches under `lab/` that modify other projects (Twenty, Directus). Those are licensed under the respective project's license; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Twenty and Directus are trademarks of their owners; CacheWitness is not affiliated with or endorsed by them.

@@ -31,7 +31,7 @@ Deterministic reproduction: a test-only patch adds a pause point in `respond.ts`
 - unpatched code: stale in **20 of 20** runs (two instances) and **10 of 10** (one instance); the next GET returns the old title with `X-Cache-Status: HIT`
 - the pause point only changes timing; without it the same order happens on its own when saves come in quick succession (next section)
 
-Scenario, patch, and scripts: <link to CacheWitness repo, lab/directus/>
+Scenario, patch, and scripts: <link to CacheWitness repo, lab/directus/>. The patch is offered under MSCL-1.0, like the code it modifies.
 
 ### How likely is it without forcing the order?
 

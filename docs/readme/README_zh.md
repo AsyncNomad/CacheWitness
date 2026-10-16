@@ -206,4 +206,4 @@ stale-set（20 轮，每轮都到达了钩子）
 
 ## 许可证 (License)
 
-本项目基于 **Apache License 2.0** 发布。
+本项目基于 **Apache License 2.0** 发布，但 `lab/` 下修改其他项目（Twenty、Directus）的实验补丁除外，它们遵循各自项目的许可证，详见 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)。Twenty 与 Directus 是其各自所有者的商标；CacheWitness 与它们没有关联，也未获其认可。
