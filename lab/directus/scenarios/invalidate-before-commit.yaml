@@ -1,0 +1,39 @@
+# Invalidate before commit on Directus. Upstream Directus purges after the
+# commit and should pass; CW_BUG=early-purge (lab patch) moves the purge into
+# the transaction and should fail. The writer is held at the
+# `write:before-commit` hook in ItemsService.updateMany.
+name: directus-invalidate-before-commit
+runs: 20
+apps:
+  a: http://127.0.0.1:8055
+  b: http://127.0.0.1:8056
+redis: redis://127.0.0.1:6379
+postgres: "host=127.0.0.1 user=postgres password=postgres dbname=directus"
+
+requests:
+  update:
+    method: PATCH
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+    json: { title: "${value}" }
+  read:
+    method: GET
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+
+state:
+  db_query: "select title from articles where id = 1"
+  app_view: { app: a, request: read, field: /data/title, hit_header: x-cache-status }
+
+pattern:
+  invalidate-before-commit:
+    writer: b
+    reader: a
+    write: update
+    read: read
+    key: articles
+    # a slow commit, with the reader arriving after a delayed second purge
+    # (CW_DDEL_MS=500) and before the commit: the order a timer-based fix
+    # misses. Pinning it also keeps the verdict the same on every run (without
+    # it, the cold first run took longer than 500 ms and flipped 1 in 20).
+    hold_ms: 1000

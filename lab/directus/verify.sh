@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run a cawit verify scenario against two Directus API servers with a chosen fix.
-# Usage: [FIX=none|ddel|gen|retry] [TTL=5m] [N=20] [RESET=1] [SCENARIO=stale-set] lab/directus/verify.sh <directus checkout>
+# Usage: [FIX=none|ddel|gen|retry] [BUG=early-purge] [TTL=5m] [N=20] [RESET=1] [SCENARIO=stale-set] lab/directus/verify.sh <directus checkout>
 # Needs lab/directus/setup.sh (patched and built). Shares the isolated lab
 # network of lab/twenty (same Postgres instance, database `directus`; same
 # Redis). RESET=1 drops and re-bootstraps the database. Exit code is cawit's.
@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 DX=$(cd "${1:?directus checkout}" && pwd)
 FIX=${FIX:-none}; N=${N:-20}; SCENARIO=${SCENARIO:-stale-set}
-OUT="$ROOT/lab/out/directus-$SCENARIO-$FIX-ttl${TTL:-5m}-$(date +%Y%m%d-%H%M%S)"
+OUT="$ROOT/lab/out/directus-$SCENARIO-$FIX${BUG:+-bug-$BUG}-ttl${TTL:-5m}-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT"
 TOKEN=cawit-lab-admin-token
 source "$ROOT/lab/twenty/isolation.sh"
@@ -43,7 +43,7 @@ cleanup() {
 trap cleanup EXIT
 for i in 0 1; do
   node_isolated -d --name "cw-directus-$i" "${DENV[@]}" -e PORT=$((8055 + i)) -e PUBLIC_URL=http://127.0.0.1:$((8055 + i)) \
-    -e CAWIT_SYNC_URL=redis://127.0.0.1:6379 -e CAWIT_ALLOW_PRODUCTION=1 -e CW_FIX="$FIX" -e CW_DDEL_MS=500 \
+    -e CAWIT_SYNC_URL=redis://127.0.0.1:6379 -e CAWIT_ALLOW_PRODUCTION=1 -e CW_FIX="$FIX" -e CW_BUG="${BUG:-}" -e CW_DDEL_MS=500 \
     -v "$DX":/w -w /w/api node:22-slim node dist/cli/run.js start > /dev/null
 done
 wait_port 8055; wait_port 8056

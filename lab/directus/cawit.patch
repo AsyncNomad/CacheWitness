@@ -116,6 +116,38 @@ index c3a3d2a..4a63a9b 100644
  		} catch (err: any) {
  			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
  		}
+diff --git a/api/src/services/items.ts b/api/src/services/items.ts
+index 760c09d..2363f38 100644
+--- a/api/src/services/items.ts
++++ b/api/src/services/items.ts
+@@ -39,6 +39,8 @@ import { validateKeys } from '../utils/validate-keys.js';
+ import { captureSeatCount, validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
+ import { handleVersion } from '../utils/versioning/handle-version.js';
+ import { PayloadService } from './payload.js';
++// CacheWitness sync hook (test only): a no-op unless CAWIT_SYNC_URL is set.
++import * as cawit from 'cawit-hook';
+ 
+ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
+ 	implements AbstractService<Item>
+@@ -966,9 +968,17 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
+ 					}
+ 				}
+ 			}
++
++			// CacheWitness lab patch (test only): CW_BUG=early-purge purges inside the
++			// transaction instead of after the commit (the invalidate-before-commit bug).
++			if (process.env['CW_BUG'] === 'early-purge' && shouldClearCache(this.cache, opts, this.collection)) {
++				await this.cache.clear();
++			}
++
++			await cawit.syncPoint('write:before-commit', this.collection);
+ 		});
+ 
+-		if (shouldClearCache(this.cache, opts, this.collection)) {
++		if (shouldClearCache(this.cache, opts, this.collection) && process.env['CW_BUG'] !== 'early-purge') {
+ 			await this.cache.clear();
+ 		}
+ 
 diff --git a/api/tsdown.config.ts b/api/tsdown.config.ts
 index 2290baf..b294ad3 100644
 --- a/api/tsdown.config.ts

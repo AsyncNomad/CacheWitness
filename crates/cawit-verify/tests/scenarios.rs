@@ -26,5 +26,5 @@ fn shipped_scenarios_load() {
         }
     }
     seen.sort();
-    assert_eq!(seen, ["directus-failed-invalidation", "directus-failed-invalidation-bounded", "directus-stale-set", "twenty-stale-set"]);
+    assert_eq!(seen, ["directus-failed-invalidation", "directus-failed-invalidation-bounded", "directus-invalidate-before-commit", "directus-stale-set", "twenty-stale-set"]);
 }

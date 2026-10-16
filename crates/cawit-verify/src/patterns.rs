@@ -23,6 +23,7 @@ impl Registry {
         let mut r = Registry { patterns: HashMap::new() };
         r.register("stale-set", stale_set);
         r.register("failed-invalidation", failed_invalidation);
+        r.register("invalidate-before-commit", invalidate_before_commit);
         r
     }
 
@@ -227,6 +228,82 @@ fn failed_invalidation(scenario: &Scenario, p: Value) -> Result<Vec<Value>> {
     Ok(steps)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InvalidateBeforeCommit {
+    /// App whose write is held just before its commit.
+    writer: String,
+    /// App that reads (and refills) while the write is uncommitted.
+    reader: String,
+    write: String,
+    read: String,
+    #[serde(default = "value_var")]
+    value_var: String,
+    /// Sync point at the end of the write transaction, before the commit.
+    #[serde(default = "before_commit")]
+    point: String,
+    #[serde(default)]
+    key: Option<String>,
+    /// Keep the write uncommitted this long before the reader reads (a slow
+    /// commit, with the reader arriving late in the window). Pin it when the
+    /// code under test relies on timers, e.g. a delayed second invalidation:
+    /// a reader that refills after the timer and before the commit is the
+    /// order such a fix misses, and without a pinned hold the verdict depends
+    /// on how long the steps happened to take.
+    #[serde(default)]
+    hold_ms: u64,
+    #[serde(default = "hundred")]
+    settle_ms: u64,
+    #[serde(default)]
+    within_ms: Option<u64>,
+    #[serde(default = "ten_seconds")]
+    reached_timeout_ms: u64,
+}
+
+fn before_commit() -> String {
+    "write:before-commit".into()
+}
+
+/// Invalidate before commit: a write that invalidates inside its transaction
+/// leaves a window in which a reader refills with the still-committed old
+/// value; after the commit nothing removes it.
+///
+///   1. write `a` and let it commit
+///   2. hold the next write (`b`) at the end of its transaction, before commit
+///   3. read through the reader app: it misses and refills with `a`
+///   4. release the write, which commits `b`
+///   5. `not_stale`, `refilled`
+///
+/// Code that invalidates after the commit passes; this pattern is also a
+/// check that a correct implementation is not flagged.
+fn invalidate_before_commit(scenario: &Scenario, p: Value) -> Result<Vec<Value>> {
+    let p: InvalidateBeforeCommit = params(p)?;
+    let (not_stale, refilled, via_app) = verdict_checks(scenario)?;
+    let mut steps = vec![
+        step("http", &[("app", s(&p.writer)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-a"))]),
+        step("sleep", &[("ms", p.settle_ms.into())]),
+        step("arm", &[("point", s(&p.point)), ("key", opt(p.key.as_deref())), ("as", s("commit"))]),
+        step(
+            "http",
+            &[("app", s(&p.writer)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-b")), ("async", s("held_write"))],
+        ),
+        step("reached", &[("sync", s("commit")), ("timeout_ms", p.reached_timeout_ms.into())]),
+        step("sleep", &[("ms", p.hold_ms.into())]),
+        step("http", &[("app", s(&p.reader)), ("request", s(&p.read))]),
+        step("sleep", &[("ms", p.settle_ms.into())]),
+        step("release", &[("sync", s("commit"))]),
+        step("await", &[("task", s("held_write"))]),
+        step("sleep", &[("ms", p.settle_ms.into())]),
+        step("expect", &[("name", s("not_stale")), ("check", s(not_stale)), ("within_ms", opt(p.within_ms))]),
+    ];
+    if !via_app {
+        steps.push(step("http", &[("app", s(&p.reader)), ("request", s(&p.read))]));
+        steps.push(step("sleep", &[("ms", p.settle_ms.into())]));
+    }
+    steps.push(step("expect", &[("name", s("refilled")), ("check", s(refilled))]));
+    Ok(steps)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,6 +347,17 @@ mod tests {
         }
         let text = serde_yaml::to_string(&steps).unwrap();
         assert!(text.contains("action: fail") && text.contains("allow_error: true") && text.contains("invalidate:before"));
+    }
+
+    #[test]
+    fn invalidate_before_commit_holds_the_write_and_reads_in_between() {
+        let sc = scenario("{ cache_key: k, db_query: q }");
+        let p: Value = serde_yaml::from_str("{ invalidate-before-commit: { writer: a, reader: b, write: w, read: r } }").unwrap();
+        let steps = Registry::builtin().expand(&sc, &p).unwrap();
+        let reg = crate::steps::Registry::builtin();
+        let kinds: Vec<&str> = steps.iter().map(|v| reg.build(v).unwrap().kind()).collect();
+        assert_eq!(&kinds[2..8], ["arm", "http", "reached", "sleep", "http", "sleep"]);
+        assert!(serde_yaml::to_string(&steps).unwrap().contains("write:before-commit"));
     }
 
     #[test]
