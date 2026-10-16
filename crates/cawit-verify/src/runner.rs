@@ -56,7 +56,10 @@ impl Report {
 }
 
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 impl Report {
@@ -112,7 +115,9 @@ pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&Ru
 
     let pg = match &scenario.postgres {
         Some(conn) => {
-            let (client, connection) = tokio_postgres::connect(conn, tokio_postgres::NoTls).await.context("connecting to postgres")?;
+            let (client, connection) = tokio_postgres::connect(conn, tokio_postgres::NoTls)
+                .await
+                .context("connecting to postgres")?;
             tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -125,7 +130,9 @@ pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&Ru
     let total = opts.runs.unwrap_or(scenario.runs);
     let mut results = Vec::new();
     for i in 1..=total {
-        let redis = cawit_resp::Client::connect(&scenario.redis).await.with_context(|| format!("connecting to {}", scenario.redis))?;
+        let redis = cawit_resp::Client::connect(&scenario.redis)
+            .await
+            .with_context(|| format!("connecting to {}", scenario.redis))?;
         let mut vars = Vars::new();
         vars.insert("run".into(), format!("{run_id}-{i}"));
         vars.insert("run_index".into(), i.to_string());
@@ -157,12 +164,24 @@ pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&Ru
             }
         }
         cleanup(&mut ctx).await;
-        let outcome = outcome.unwrap_or(if ctx.expectations.iter().all(|e| e.pass) { Outcome::Pass } else { Outcome::Fail });
-        let result = RunResult { run: i, outcome, expectations: ctx.expectations, note };
+        let outcome = outcome.unwrap_or(if ctx.expectations.iter().all(|e| e.pass) {
+            Outcome::Pass
+        } else {
+            Outcome::Fail
+        });
+        let result = RunResult {
+            run: i,
+            outcome,
+            expectations: ctx.expectations,
+            note,
+        };
         on_run(&result);
         results.push(result);
     }
-    Ok(Report { scenario: scenario.name.clone(), runs: results })
+    Ok(Report {
+        scenario: scenario.name.clone(),
+        runs: results,
+    })
 }
 
 /// Never leave an app blocked or a sync point armed after a run.
@@ -189,14 +208,22 @@ mod tests {
         RunResult {
             run: i,
             outcome,
-            expectations: vec![Expectation { name: "not_stale".into(), check: "cache_not_stale".into(), pass, detail: "cache=<a> db=b".into() }],
+            expectations: vec![Expectation {
+                name: "not_stale".into(),
+                check: "cache_not_stale".into(),
+                pass,
+                detail: "cache=<a> db=b".into(),
+            }],
             note: None,
         }
     }
 
     #[test]
     fn exit_codes() {
-        let r = |o: Vec<Outcome>| Report { scenario: "s".into(), runs: o.into_iter().enumerate().map(|(i, o)| run(i as u32, o)).collect() };
+        let r = |o: Vec<Outcome>| Report {
+            scenario: "s".into(),
+            runs: o.into_iter().enumerate().map(|(i, o)| run(i as u32, o)).collect(),
+        };
         assert_eq!(r(vec![Outcome::Pass, Outcome::Pass]).exit_code(), 0);
         assert_eq!(r(vec![Outcome::Pass, Outcome::Fail, Outcome::NotReached]).exit_code(), 1);
         assert_eq!(r(vec![Outcome::Pass, Outcome::NotReached]).exit_code(), 2);
@@ -205,7 +232,10 @@ mod tests {
 
     #[test]
     fn junit_marks_failures_and_skips_and_escapes() {
-        let rep = Report { scenario: "s".into(), runs: vec![run(1, Outcome::Pass), run(2, Outcome::Fail), run(3, Outcome::NotReached)] };
+        let rep = Report {
+            scenario: "s".into(),
+            runs: vec![run(1, Outcome::Pass), run(2, Outcome::Fail), run(3, Outcome::NotReached)],
+        };
         let x = rep.junit();
         assert!(x.contains(r#"tests="3" failures="1" skipped="1""#));
         assert!(x.contains(r#"<failure message="not_stale">"#));

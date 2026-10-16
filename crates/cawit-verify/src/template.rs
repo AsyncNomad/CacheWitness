@@ -14,7 +14,9 @@ pub fn render(s: &str, vars: &Vars) -> Result<String> {
     while let Some(start) = rest.find("${") {
         out.push_str(&rest[..start]);
         let after = &rest[start + 2..];
-        let Some(end) = after.find('}') else { bail!("unclosed ${{ in {s:?}") };
+        let Some(end) = after.find('}') else {
+            bail!("unclosed ${{ in {s:?}")
+        };
         let name = &after[..end];
         let value = match name.strip_prefix("env.") {
             Some(env) => std::env::var(env).map_err(|_| anyhow::anyhow!("environment variable {env} is not set"))?,
@@ -36,7 +38,9 @@ pub fn render_json(v: &Value, vars: &Vars) -> Result<Value> {
         Value::String(s) => Value::String(render(s, vars)?),
         Value::Array(items) => Value::Array(items.iter().map(|i| render_json(i, vars)).collect::<Result<_>>()?),
         Value::Object(map) => Value::Object(
-            map.iter().map(|(k, v)| Ok((k.clone(), render_json(v, vars)?))).collect::<Result<_>>()?,
+            map.iter()
+                .map(|(k, v)| Ok((k.clone(), render_json(v, vars)?)))
+                .collect::<Result<_>>()?,
         ),
         other => other.clone(),
     })

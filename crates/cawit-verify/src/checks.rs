@@ -30,7 +30,10 @@ impl Registry {
     /// `app_cached_equals_db` (that, and it was served from the cache).
     pub fn builtin() -> Registry {
         let mut r = Registry { checks: HashMap::new() };
-        r.register("cache_not_stale", Box::new(Compare(|cache, db| cache.is_none() || cache.as_deref() == Some(db))));
+        r.register(
+            "cache_not_stale",
+            Box::new(Compare(|cache, db| cache.is_none() || cache.as_deref() == Some(db))),
+        );
         r.register("cache_equals_db", Box::new(Compare(|cache, db| cache.as_deref() == Some(db))));
         r.register("cache_absent", Box::new(Compare(|cache, _db| cache.is_none())));
         r.register("app_equals_db", Box::new(AppView { need_hit: false }));
@@ -49,7 +52,11 @@ impl Registry {
 
 /// Cache value (None if absent) and database value as text.
 pub async fn observe(ctx: &mut RunCtx<'_>) -> Result<(Option<String>, String)> {
-    let state = ctx.scenario.state.as_ref().context("this check needs a `state` section in the scenario")?;
+    let state = ctx
+        .scenario
+        .state
+        .as_ref()
+        .context("this check needs a `state` section in the scenario")?;
     let key = state.cache_key.as_deref().context("this check needs `state.cache_key`")?;
     let reply = ctx.redis.cmd(&["GET", key]).await?;
     let raw = match reply {
@@ -61,7 +68,9 @@ pub async fn observe(ctx: &mut RunCtx<'_>) -> Result<(Option<String>, String)> {
     let cache = match (raw, &state.cache_field) {
         (Some(text), Some(field)) => {
             let v: serde_json::Value = serde_json::from_str(&text).with_context(|| format!("cache value of {key} is not JSON"))?;
-            Some(json_text(v.get(field).with_context(|| format!("cache value has no field `{field}`"))?))
+            Some(json_text(
+                v.get(field).with_context(|| format!("cache value has no field `{field}`"))?,
+            ))
         }
         (raw, _) => raw,
     };
@@ -69,10 +78,15 @@ pub async fn observe(ctx: &mut RunCtx<'_>) -> Result<(Option<String>, String)> {
 }
 
 async fn db_value(ctx: &RunCtx<'_>) -> Result<String> {
-    let state = ctx.scenario.state.as_ref().context("this check needs a `state` section in the scenario")?;
+    let state = ctx
+        .scenario
+        .state
+        .as_ref()
+        .context("this check needs a `state` section in the scenario")?;
     let pg = ctx.pg.context("this check needs `postgres` in the scenario")?;
     let row = pg.query_one(state.db_query.as_str(), &[]).await.context("running state.db_query")?;
-    row.try_get(0).context("state.db_query must return one text column (cast with ::text)")
+    row.try_get(0)
+        .context("state.db_query must return one text column (cast with ::text)")
 }
 
 fn json_text(v: &serde_json::Value) -> String {
@@ -84,11 +98,19 @@ fn json_text(v: &serde_json::Value) -> String {
 
 /// What the application serves for `state.app_view`, and whether it came from the cache.
 pub async fn observe_app(ctx: &mut RunCtx<'_>) -> Result<(String, Option<bool>)> {
-    let state = ctx.scenario.state.as_ref().context("this check needs a `state` section in the scenario")?;
+    let state = ctx
+        .scenario
+        .state
+        .as_ref()
+        .context("this check needs a `state` section in the scenario")?;
     let view = state.app_view.as_ref().context("this check needs `state.app_view`")?;
-    let resp = crate::steps::prepare(ctx, &view.app, &view.request, &Default::default())?.send().await?;
+    let resp = crate::steps::prepare(ctx, &view.app, &view.request, &Default::default())?
+        .send()
+        .await?;
     let body: serde_json::Value = serde_json::from_slice(&resp.body).context("app_view response is not JSON")?;
-    let value = body.pointer(&view.field).with_context(|| format!("app_view response has no `{}`", view.field))?;
+    let value = body
+        .pointer(&view.field)
+        .with_context(|| format!("app_view response has no `{}`", view.field))?;
     let hit = view.hit_header.as_ref().map(|h| resp.header(h) == Some(view.hit_value.as_str()));
     Ok((json_text(value), hit))
 }
@@ -114,7 +136,10 @@ impl Check for AppView {
                 Some(false) => " (cache miss)",
                 None => "",
             };
-            Ok(CheckResult { pass, detail: format!("served={served}{source} db={db}") })
+            Ok(CheckResult {
+                pass,
+                detail: format!("served={served}{source} db={db}"),
+            })
         })
     }
 }
@@ -126,7 +151,10 @@ impl Check for Compare {
         Box::pin(async move {
             let (cache, db) = observe(ctx).await?;
             let pass = (self.0)(&cache, &db);
-            Ok(CheckResult { pass, detail: format!("cache={} db={db}", cache.as_deref().unwrap_or("<absent>")) })
+            Ok(CheckResult {
+                pass,
+                detail: format!("cache={} db={db}", cache.as_deref().unwrap_or("<absent>")),
+            })
         })
     }
 }

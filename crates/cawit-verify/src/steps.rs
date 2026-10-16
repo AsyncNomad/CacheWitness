@@ -133,14 +133,21 @@ pub struct Prepared {
 /// Render the named request template for `app` with the run variables plus `extra`.
 pub fn prepare(ctx: &RunCtx<'_>, app: &str, request: &str, extra: &BTreeMap<String, String>) -> Result<Prepared> {
     let base = ctx.scenario.apps.get(app).with_context(|| format!("unknown app `{app}`"))?.clone();
-    let tpl = ctx.scenario.requests.get(request).with_context(|| format!("unknown request `{request}`"))?;
+    let tpl = ctx
+        .scenario
+        .requests
+        .get(request)
+        .with_context(|| format!("unknown request `{request}`"))?;
     let mut vars = ctx.vars.clone();
     for (k, v) in extra {
         vars.insert(k.clone(), render(v, &ctx.vars)?);
     }
     let path = render(&tpl.path, &vars)?;
-    let mut headers: Vec<(String, String)> =
-        tpl.headers.iter().map(|(k, v)| Ok((k.clone(), render(v, &vars)?))).collect::<Result<_>>()?;
+    let mut headers: Vec<(String, String)> = tpl
+        .headers
+        .iter()
+        .map(|(k, v)| Ok((k.clone(), render(v, &vars)?)))
+        .collect::<Result<_>>()?;
     let body = match &tpl.json {
         Some(j) => {
             headers.push(("content-type".into(), "application/json".into()));
@@ -148,13 +155,27 @@ pub fn prepare(ctx: &RunCtx<'_>, app: &str, request: &str, extra: &BTreeMap<Stri
         }
         None => None,
     };
-    Ok(Prepared { base, method: tpl.method.clone(), path, headers, body, error_field: tpl.error_field.clone() })
+    Ok(Prepared {
+        base,
+        method: tpl.method.clone(),
+        path,
+        headers,
+        body,
+        error_field: tpl.error_field.clone(),
+    })
 }
 
 impl Prepared {
     /// Send it; HTTP errors and `error_field` in the body are errors.
     pub async fn send(self) -> Result<http::Response> {
-        let Prepared { base, method, path, headers, body, error_field } = self;
+        let Prepared {
+            base,
+            method,
+            path,
+            headers,
+            body,
+            error_field,
+        } = self;
         let resp = http::request(&base, &method, &path, &headers, body).await?;
         let text = || String::from_utf8_lossy(&resp.body).chars().take(300).collect::<String>();
         if resp.status >= 400 {
@@ -180,7 +201,11 @@ impl Step for HttpStep {
             let allow_error = self.allow_error;
             let fut = async move {
                 match send.await {
-                    Err(e) if allow_error => Ok(http::Response { status: 0, headers: Vec::new(), body: format!("{e:#}").into_bytes() }),
+                    Err(e) if allow_error => Ok(http::Response {
+                        status: 0,
+                        headers: Vec::new(),
+                        body: format!("{e:#}").into_bytes(),
+                    }),
                     other => other,
                 }
             };
@@ -235,12 +260,24 @@ impl Step for ArmStep {
             };
             let reply = ctx
                 .redis
-                .cmd(&["SET", &format!("cawit:arm:{}", self.point), &arm_value(&token, self.action, &key), "PX", "30000"])
+                .cmd(&[
+                    "SET",
+                    &format!("cawit:arm:{}", self.point),
+                    &arm_value(&token, self.action, &key),
+                    "PX",
+                    "30000",
+                ])
                 .await?;
             if let Frame::Error(e) = reply {
                 bail!("arming {}: {e}", self.point);
             }
-            ctx.syncs.insert(self.alias.clone(), Armed { point: self.point.clone(), token });
+            ctx.syncs.insert(
+                self.alias.clone(),
+                Armed {
+                    point: self.point.clone(),
+                    token,
+                },
+            );
             Ok(Flow::Continue)
         })
     }
@@ -274,11 +311,18 @@ impl Step for ReachedStep {
     }
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>> {
         Box::pin(async move {
-            let armed = ctx.syncs.get(&self.sync).with_context(|| format!("`{}` was never armed", self.sync))?.clone();
+            let armed = ctx
+                .syncs
+                .get(&self.sync)
+                .with_context(|| format!("`{}` was never armed", self.sync))?
+                .clone();
             let secs = format!("{:.3}", self.timeout_ms as f64 / 1000.0);
             let reply = ctx.redis.cmd(&["BLPOP", &format!("cawit:reached:{}", armed.token), &secs]).await?;
             if reply.is_nil() {
-                return Ok(Flow::NotReached(format!("sync point `{}` not reached within {}ms", armed.point, self.timeout_ms)));
+                return Ok(Flow::NotReached(format!(
+                    "sync point `{}` not reached within {}ms",
+                    armed.point, self.timeout_ms
+                )));
             }
             Ok(Flow::Continue)
         })
@@ -297,7 +341,11 @@ impl Step for ReleaseStep {
     }
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>> {
         Box::pin(async move {
-            let armed = ctx.syncs.get(&self.sync).with_context(|| format!("`{}` was never armed", self.sync))?.clone();
+            let armed = ctx
+                .syncs
+                .get(&self.sync)
+                .with_context(|| format!("`{}` was never armed", self.sync))?
+                .clone();
             // A hold that already timed out let the call go on its own: the
             // order this release was meant to create did not happen.
             let timed_out = ctx.redis.cmd(&["LLEN", &format!("cawit:timeout:{}", armed.token)]).await?;
@@ -327,7 +375,10 @@ impl Step for AwaitStep {
     }
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>> {
         Box::pin(async move {
-            let handle = ctx.tasks.remove(&self.task).with_context(|| format!("no background task `{}`", self.task))?;
+            let handle = ctx
+                .tasks
+                .remove(&self.task)
+                .with_context(|| format!("no background task `{}`", self.task))?;
             handle.await.map_err(|e| anyhow!("task `{}` panicked: {e}", self.task))??;
             Ok(Flow::Continue)
         })
@@ -370,7 +421,10 @@ impl Step for ExpectStep {
     }
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>> {
         Box::pin(async move {
-            let check = ctx.checks.get(&self.check).with_context(|| format!("unknown check `{}`", self.check))?;
+            let check = ctx
+                .checks
+                .get(&self.check)
+                .with_context(|| format!("unknown check `{}`", self.check))?;
             let start = tokio::time::Instant::now();
             let mut r = check.eval(ctx).await?;
             if let Some(limit) = self.within_ms {
@@ -379,9 +433,19 @@ impl Step for ExpectStep {
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     r = check.eval(ctx).await?;
                 }
-                r.detail = format!("{} (after {}ms, limit {}ms)", r.detail, start.elapsed().as_millis(), limit.as_millis());
+                r.detail = format!(
+                    "{} (after {}ms, limit {}ms)",
+                    r.detail,
+                    start.elapsed().as_millis(),
+                    limit.as_millis()
+                );
             }
-            ctx.expectations.push(Expectation { name: self.name.clone(), check: self.check.clone(), pass: r.pass, detail: r.detail });
+            ctx.expectations.push(Expectation {
+                name: self.name.clone(),
+                check: self.check.clone(),
+                pass: r.pass,
+                detail: r.detail,
+            });
             Ok(Flow::Continue)
         })
     }

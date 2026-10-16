@@ -98,7 +98,11 @@ fn parse_at(buf: &[u8], pos: usize) -> Result<Option<(Frame, usize)>, ProtocolEr
             if n < 0 {
                 return Ok(Some((Frame::Array(None), next)));
             }
-            let count = if matches!(buf[pos], b'%' | b'|') { n as usize * 2 } else { n as usize };
+            let count = if matches!(buf[pos], b'%' | b'|') {
+                n as usize * 2
+            } else {
+                n as usize
+            };
             let mut items = Vec::with_capacity(count);
             let mut p = next;
             for _ in 0..count {
@@ -150,7 +154,11 @@ impl Client {
             Some((hp, db)) => (hp, db.parse::<u32>().unwrap_or(0)),
             None => (rest, 0),
         };
-        let addr = if hostport.contains(':') { hostport.to_string() } else { format!("{hostport}:6379") };
+        let addr = if hostport.contains(':') {
+            hostport.to_string()
+        } else {
+            format!("{hostport}:6379")
+        };
         let stream = TcpStream::connect(addr).await?;
         stream.set_nodelay(true)?;
         let mut client = Client { stream, buf: Vec::new() };
@@ -197,7 +205,7 @@ mod tests {
             parse(b"*2\r\n$1\r\na\r\n:1\r\n").unwrap().unwrap().0,
             Frame::Array(Some(vec![Frame::Bulk(Some(b"a".to_vec())), Frame::Integer(1)]))
         );
-        assert_eq!(parse(b"%1\r\n+k\r\n:1\r\n").unwrap().unwrap().0.is_nil(), false);
+        assert!(!parse(b"%1\r\n+k\r\n:1\r\n").unwrap().unwrap().0.is_nil());
     }
 
     #[test]

@@ -144,12 +144,29 @@ fn stale_set(scenario: &Scenario, p: Value) -> Result<Vec<Value>> {
     let p: StaleSet = params(p)?;
     let (not_stale, refilled, via_app) = verdict_checks(scenario)?;
     let mut steps = vec![
-        step("http", &[("app", s(&p.reader)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-a"))]),
+        step(
+            "http",
+            &[
+                ("app", s(&p.reader)),
+                ("request", s(&p.write)),
+                ("vars", vars(&p.value_var, "${run}-a")),
+            ],
+        ),
         step("sleep", &[("ms", 50.into())]),
-        step("arm", &[("point", s(&p.point)), ("key", opt(p.key.as_deref())), ("as", s("refill"))]),
+        step(
+            "arm",
+            &[("point", s(&p.point)), ("key", opt(p.key.as_deref())), ("as", s("refill"))],
+        ),
         step("http", &[("app", s(&p.reader)), ("request", s(&p.read)), ("async", s("held_read"))]),
         step("reached", &[("sync", s("refill")), ("timeout_ms", p.reached_timeout_ms.into())]),
-        step("http", &[("app", s(&p.writer)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-b"))]),
+        step(
+            "http",
+            &[
+                ("app", s(&p.writer)),
+                ("request", s(&p.write)),
+                ("vars", vars(&p.value_var, "${run}-b")),
+            ],
+        ),
     ];
     if p.hold_ms > 0 {
         steps.push(step("sleep", &[("ms", p.hold_ms.into())]));
@@ -158,7 +175,10 @@ fn stale_set(scenario: &Scenario, p: Value) -> Result<Vec<Value>> {
         step("release", &[("sync", s("refill"))]),
         step("await", &[("task", s("held_read"))]),
         step("sleep", &[("ms", p.settle_ms.into())]),
-        step("expect", &[("name", s("not_stale")), ("check", s(not_stale)), ("within_ms", opt(p.within_ms))]),
+        step(
+            "expect",
+            &[("name", s("not_stale")), ("check", s(not_stale)), ("within_ms", opt(p.within_ms))],
+        ),
     ]);
     if !via_app {
         // Reading through the app already refilled on a miss; otherwise read once.
@@ -208,17 +228,40 @@ fn failed_invalidation(scenario: &Scenario, p: Value) -> Result<Vec<Value>> {
     let p: FailedInvalidation = params(p)?;
     let (not_stale, refilled, via_app) = verdict_checks(scenario)?;
     let mut steps = vec![
-        step("http", &[("app", s(&p.app)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-a"))]),
-        step("http", &[("app", s(&p.app)), ("request", s(&p.read))]),
-        step("sleep", &[("ms", p.settle_ms.into())]),
-        step("arm", &[("point", s(&p.point)), ("key", opt(p.key.as_deref())), ("action", s("fail")), ("as", s("fault"))]),
         step(
             "http",
-            &[("app", s(&p.app)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-b")), ("allow_error", true.into())],
+            &[
+                ("app", s(&p.app)),
+                ("request", s(&p.write)),
+                ("vars", vars(&p.value_var, "${run}-a")),
+            ],
+        ),
+        step("http", &[("app", s(&p.app)), ("request", s(&p.read))]),
+        step("sleep", &[("ms", p.settle_ms.into())]),
+        step(
+            "arm",
+            &[
+                ("point", s(&p.point)),
+                ("key", opt(p.key.as_deref())),
+                ("action", s("fail")),
+                ("as", s("fault")),
+            ],
+        ),
+        step(
+            "http",
+            &[
+                ("app", s(&p.app)),
+                ("request", s(&p.write)),
+                ("vars", vars(&p.value_var, "${run}-b")),
+                ("allow_error", true.into()),
+            ],
         ),
         step("reached", &[("sync", s("fault")), ("timeout_ms", p.reached_timeout_ms.into())]),
         step("sleep", &[("ms", p.settle_ms.into())]),
-        step("expect", &[("name", s("not_stale")), ("check", s(not_stale)), ("within_ms", opt(p.within_ms))]),
+        step(
+            "expect",
+            &[("name", s("not_stale")), ("check", s(not_stale)), ("within_ms", opt(p.within_ms))],
+        ),
     ];
     if !via_app {
         steps.push(step("http", &[("app", s(&p.app)), ("request", s(&p.read))]));
@@ -280,12 +323,27 @@ fn invalidate_before_commit(scenario: &Scenario, p: Value) -> Result<Vec<Value>>
     let p: InvalidateBeforeCommit = params(p)?;
     let (not_stale, refilled, via_app) = verdict_checks(scenario)?;
     let mut steps = vec![
-        step("http", &[("app", s(&p.writer)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-a"))]),
-        step("sleep", &[("ms", p.settle_ms.into())]),
-        step("arm", &[("point", s(&p.point)), ("key", opt(p.key.as_deref())), ("as", s("commit"))]),
         step(
             "http",
-            &[("app", s(&p.writer)), ("request", s(&p.write)), ("vars", vars(&p.value_var, "${run}-b")), ("async", s("held_write"))],
+            &[
+                ("app", s(&p.writer)),
+                ("request", s(&p.write)),
+                ("vars", vars(&p.value_var, "${run}-a")),
+            ],
+        ),
+        step("sleep", &[("ms", p.settle_ms.into())]),
+        step(
+            "arm",
+            &[("point", s(&p.point)), ("key", opt(p.key.as_deref())), ("as", s("commit"))],
+        ),
+        step(
+            "http",
+            &[
+                ("app", s(&p.writer)),
+                ("request", s(&p.write)),
+                ("vars", vars(&p.value_var, "${run}-b")),
+                ("async", s("held_write")),
+            ],
         ),
         step("reached", &[("sync", s("commit")), ("timeout_ms", p.reached_timeout_ms.into())]),
         step("sleep", &[("ms", p.hold_ms.into())]),
@@ -294,7 +352,10 @@ fn invalidate_before_commit(scenario: &Scenario, p: Value) -> Result<Vec<Value>>
         step("release", &[("sync", s("commit"))]),
         step("await", &[("task", s("held_write"))]),
         step("sleep", &[("ms", p.settle_ms.into())]),
-        step("expect", &[("name", s("not_stale")), ("check", s(not_stale)), ("within_ms", opt(p.within_ms))]),
+        step(
+            "expect",
+            &[("name", s("not_stale")), ("check", s(not_stale)), ("within_ms", opt(p.within_ms))],
+        ),
     ];
     if !via_app {
         steps.push(step("http", &[("app", s(&p.reader)), ("request", s(&p.read))]));
@@ -309,8 +370,10 @@ mod tests {
     use super::*;
 
     fn scenario(state: &str) -> Scenario {
-        Scenario::parse(&format!("name: t\napps: {{ a: http://x, b: http://y }}\nredis: redis://r\nstate: {state}\npattern: {{ stale-set: {{}} }}\n"))
-            .unwrap()
+        Scenario::parse(&format!(
+            "name: t\napps: {{ a: http://x, b: http://y }}\nredis: redis://r\nstate: {state}\npattern: {{ stale-set: {{}} }}\n"
+        ))
+        .unwrap()
     }
 
     #[test]
@@ -322,7 +385,10 @@ mod tests {
         let kinds: Vec<&str> = steps.iter().map(|v| reg.build(v).unwrap().kind()).collect();
         assert_eq!(
             kinds,
-            ["http", "sleep", "arm", "http", "reached", "http", "sleep", "release", "await", "sleep", "expect", "http", "sleep", "expect"]
+            [
+                "http", "sleep", "arm", "http", "reached", "http", "sleep", "release", "await", "sleep", "expect", "http", "sleep",
+                "expect"
+            ]
         );
         let text = serde_yaml::to_string(&steps).unwrap();
         assert!(text.contains("cache_not_stale") && !text.contains("within_ms") && !text.contains("key:"));

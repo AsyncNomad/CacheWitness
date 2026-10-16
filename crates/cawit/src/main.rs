@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
 use cawit_verify::{Outcome, RunResult, runner::Options};
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "cawit", version, about = "Force cache races in a fixed order and prove the fix")]
@@ -44,7 +44,13 @@ fn print_run(r: &RunResult) {
     };
     println!("run {:>3}  {label}", r.run);
     for e in &r.expectations {
-        println!("          {} {} ({}): {}", if e.pass { "ok  " } else { "FAIL" }, e.name, e.check, e.detail);
+        println!(
+            "          {} {} ({}): {}",
+            if e.pass { "ok  " } else { "FAIL" },
+            e.name,
+            e.check,
+            e.detail
+        );
     }
     if let Some(n) = &r.note {
         println!("          {n}");
@@ -98,8 +104,18 @@ async fn verify(scenario: PathBuf, runs: Option<u32>, out: Option<PathBuf>, juni
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Verify { scenario, show_steps: true, .. } => show_steps(scenario),
-        Command::Verify { scenario, runs, out, junit, .. } => verify(scenario, runs, out, junit).await,
+        Command::Verify {
+            scenario,
+            show_steps: true,
+            ..
+        } => show_steps(scenario),
+        Command::Verify {
+            scenario,
+            runs,
+            out,
+            junit,
+            ..
+        } => verify(scenario, runs, out, junit).await,
     };
     match result {
         Ok(code) => ExitCode::from(code as u8),

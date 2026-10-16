@@ -19,12 +19,24 @@ fn shipped_scenarios_load() {
             if path.extension().is_some_and(|e| e == "yaml") {
                 let sc = Scenario::load(&path).unwrap();
                 for (i, step) in sc.resolved_steps().unwrap().iter().enumerate() {
-                    registry.build(step).unwrap_or_else(|e| panic!("{} step {}: {e:#}", path.display(), i + 1));
+                    registry
+                        .build(step)
+                        .unwrap_or_else(|e| panic!("{} step {}: {e:#}", path.display(), i + 1));
                 }
                 seen.push(sc.name);
             }
         }
     }
     seen.sort();
-    assert_eq!(seen, ["directus-failed-invalidation", "directus-failed-invalidation-bounded", "directus-invalidate-before-commit", "directus-stale-set", "directus-stale-set-one-instance", "twenty-stale-set"]);
+    assert_eq!(
+        seen,
+        [
+            "directus-failed-invalidation",
+            "directus-failed-invalidation-bounded",
+            "directus-invalidate-before-commit",
+            "directus-stale-set",
+            "directus-stale-set-one-instance",
+            "twenty-stale-set"
+        ]
+    );
 }
