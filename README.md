@@ -118,6 +118,7 @@ The verdict is simple: does Redis hold what the database committed, and does the
 All experiments ran locally, with the application lab isolated from the network. Details: [`docs/design/experiments-summary.md`](docs/design/experiments-summary.md) (Korean).
 
 - **Forced order on Twenty CRM (20 runs each):** unfixed 20/20 stale; version-compare SET 20/20 stale; lease 0/20 stale but no refill (in-process memoizer); lease + re-read 0/20 stale and 20/20 refilled.
+- **Forced order on Directus (20 runs each):** unfixed 20/20 stale; delayed double delete 20/20 stale when the reader is slower than the delay (but 10/10 fine with a fast reader, which is how it slips through ordinary tests); generation check 20/20 pass.
 - **Probability instead of order:** the same burst workload left stale values in 6.5% of bursts in one run and 0.17% in another. Delaying cache writes through a proxy inflated the rate up to 10-30x compared with a real slow refill.
 - **Detection on a real test suite:** 1,527 of 1,528 changes to cached rows were invalidated (median 1.7ms). Stale state was confirmed reliably in our ground-truth runs (157/157), but deterministic invalidation bugs were rare.
 

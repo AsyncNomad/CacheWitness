@@ -72,7 +72,7 @@ index a104331..c666411 100644
  	}
  });
 diff --git a/api/src/middleware/respond.ts b/api/src/middleware/respond.ts
-index c3a3d2a..8ce3f7c 100644
+index c3a3d2a..4a63a9b 100644
 --- a/api/src/middleware/respond.ts
 +++ b/api/src/middleware/respond.ts
 @@ -12,6 +12,9 @@ import { getCacheKey } from '../utils/get-cache-key.js';
@@ -89,7 +89,7 @@ index c3a3d2a..8ce3f7c 100644
  
  	if (shouldCache) {
  		const key = await getCacheKey(req);
-+		await cawit.syncPoint('refill:after-read', req.path);
++		await cawit.syncPoint('refill:after-read', req.baseUrl + req.path);
  
  		try {
  			await setCacheValue(cacheInstance, key, res.locals['payload'], cacheTTL);
