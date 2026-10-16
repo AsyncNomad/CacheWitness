@@ -39,23 +39,50 @@
 
 ## 빠른 시작 (Quick Start)
 
-> 초기 단계입니다. 실행기(`cawit verify`)와 Node 훅(`hooks/node`)은 동작하며, `lab/twenty/verify.sh`가 이 흐름을 Twenty CRM에 대해 돌립니다([`lab/twenty/scenarios/stale-set.yaml`](../../lab/twenty/scenarios/stale-set.yaml)). crates.io·npm 배포는 아직입니다.
+> v0.1은 아직 배포 전입니다. 그때까지는 `cargo build --release`로 실행기를 빌드하고 [`hooks/node`](../../hooks/node)의 훅을 씁니다. 실제 앱에 대한 동작 예: [`lab/twenty/`](../../lab/twenty/) (Twenty CRM), [`lab/directus/`](../../lab/directus/) (Directus).
 
-### 1. 재충전 경로에 동기화 훅 걸기
+### 1. 설치
 
-DB를 읽은 직후, 캐시에 쓰기 전에 호출 하나를 넣습니다. 테스트가 장전하지 않으면 아무것도 하지 않습니다.
+```bash
+cargo install cawit                 # 실행기, 단일 바이너리
+npm install --save-dev cawit-hook   # 훅, 의존성 없음
+```
+
+### 2. 재충전 경로에 동기화 훅 걸기
+
+DB를 읽은 직후, 캐시에 쓰기 전에 호출 하나를 넣습니다. `CAWIT_SYNC_URL`이 있고 테스트가 장전할 때만 동작합니다(`NODE_ENV=production`이면 `CAWIT_ALLOW_PRODUCTION=1` 없이는 꺼짐).
 
 ```ts
+import * as cawit from "cawit-hook";
+
 const row = await db.findOne(id);
-await cawit.syncPoint("refill:after-read", key);   // cawit이 장전하지 않으면 아무 일도 안 함
+await cawit.syncPoint("refill:after-read", key);
 await cache.set(key, serialize(row));
 ```
 
-### 2. 시나리오 실행
+### 3. 경쟁을 적고 실행하기
+
+```yaml
+# stale-set.yaml
+name: stale-set
+runs: 20
+apps: { a: "http://127.0.0.1:3000", b: "http://127.0.0.1:3001" }
+redis: redis://127.0.0.1:6379
+postgres: "host=127.0.0.1 user=postgres password=postgres dbname=app"
+requests:
+  update: { method: PATCH, path: /articles/1, json: { title: "${value}" } }
+  read:   { method: GET,   path: /articles/1 }
+state:
+  db_query: "select title from articles where id = 1"
+  app_view: { app: a, request: read, field: /title, hit_header: x-cache }
+pattern:
+  stale-set: { reader: a, writer: b, write: update, read: read, key: /articles/1 }
+```
 
 ```bash
-# stale-set 경쟁을 20회 강제한다. 한 번이라도 낡은 값이 남으면 종료 코드 1
-cawit verify stale-set.yaml --runs 20 --junit report.xml
+# 앱을 CAWIT_SYNC_URL=redis://127.0.0.1:6379 로 띄운 뒤
+cawit verify stale-set.yaml --junit report.xml   # 한 번이라도 낡은 값이 남으면 종료 코드 1
+cawit verify stale-set.yaml --show-steps          # 패턴이 하는 일 보기
 ```
 
 각 회차는 다음 순서로 진행됩니다.
@@ -64,12 +91,12 @@ cawit verify stale-set.yaml --runs 20 --junit report.xml
 2. 훅을 장전하고 A로 읽는다. A는 미스로 DB를 읽고 훅에서 멈춘다.
 3. 서버 B로 더 새 값을 쓴다 (커밋하고 무효화).
 4. A를 풀어 준다. A는 읽어 둔 값을 쓴다.
-5. Redis와 PostgreSQL을 대조한다.
-6. 한 번 더 읽고, 캐시가 최신 값으로 다시 채워지는지 확인한다 (수정이 캐시를 아예 막으면 안 된다).
+5. 리더가 DB에 커밋된 값을 받는지 확인한다.
+6. 캐시가 최신 값으로 다시 채워지는지 확인한다 (수정이 캐시를 아예 막으면 안 된다).
 
-훅에 도달하지 않은 회차는 통과로 세지 않고 버립니다.
+훅에 도달하지 않았거나 붙잡기가 시간 초과로 풀린 회차는 통과로 세지 않고 버립니다. 패턴, 단계, 판정: [`docs/scenarios.md`](../scenarios.md) (영어).
 
-### 3. 결과 확인
+### 4. 결과 확인
 
 ```
 stale-set (20회, 모든 회차가 훅에 도달)
@@ -106,7 +133,7 @@ stale-set (20회, 모든 회차가 훅에 도달)
 
 - **🎯 결정적 재현:** 알려진 캐시 경쟁 패턴을 매번 같은 순서로 일으킴
 - **✅ 수정 검증:** 수정 전 실패, 수정 후 통과, 그리고 캐시가 다시 채워지는지까지 확인
-- **🧪 시나리오 라이브러리:** stale-set, 커밋 전 무효화, 무효화 실패, 레플리카 지연 재충전
+- **🧪 내장 패턴:** stale-set, 무효화 실패(장애 주입), 커밋 전 무효화. 레플리카 지연 재충전은 계획
 - **🔍 조작 확인:** 훅에 도달하지 않은 회차는 버림
 - **🧾 순서 기반 설명 (계획):** 실패한 회차에 커밋·삭제·쓰기의 관측 순서를 함께 제공. 지금은 실패 회차에 리더가 받은 값과 DB 값을 보여줌
 - **👀 보조 기능, check 모드 (앱 코드 무수정):** Redis와 PostgreSQL WAL을 관찰해 낡은 캐시 상태를 사실로 확정

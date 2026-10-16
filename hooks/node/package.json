@@ -2,10 +2,34 @@
   "name": "cawit-hook",
   "version": "0.1.0",
   "description": "CacheWitness sync hook: pause a cache refill at a named point so a test can force a race order",
+  "keywords": [
+    "cache",
+    "redis",
+    "testing",
+    "race-condition",
+    "cache-invalidation",
+    "cachewitness"
+  ],
+  "homepage": "https://github.com/AsyncNomad/CacheWitness#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AsyncNomad/CacheWitness.git",
+    "directory": "hooks/node"
+  },
+  "bugs": {
+    "url": "https://github.com/AsyncNomad/CacheWitness/issues"
+  },
   "license": "Apache-2.0",
   "main": "index.js",
   "types": "index.d.ts",
-  "files": ["index.js", "index.d.ts"],
-  "engines": { "node": ">=18" },
-  "scripts": { "test": "node --test test/*.test.js" }
+  "files": [
+    "index.js",
+    "index.d.ts"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
 }

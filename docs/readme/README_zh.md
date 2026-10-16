@@ -39,23 +39,50 @@
 
 ## 快速开始 (Quick Start)
 
-> 早期阶段：执行器（`cawit verify`）和 Node 钩子（`hooks/node`）已可运行，`lab/twenty/verify.sh` 针对 Twenty CRM 运行这一流程（[`lab/twenty/scenarios/stale-set.yaml`](../../lab/twenty/scenarios/stale-set.yaml)）。尚未发布到 crates.io 或 npm。
+> v0.1 尚未发布。在此之前，请用 `cargo build --release` 构建执行器，并使用 [`hooks/node`](../../hooks/node) 中的钩子。针对真实应用的可运行示例：[`lab/twenty/`](../../lab/twenty/)（Twenty CRM）和 [`lab/directus/`](../../lab/directus/)（Directus）。
 
-### 1. 在回填路径中加入同步钩子
+### 1. 安装
 
-在读完数据库之后、写入缓存之前加一行调用。测试没有启用它时，它什么也不做。
+```bash
+cargo install cawit                 # 执行器，单个二进制
+npm install --save-dev cawit-hook   # 钩子，无依赖
+```
+
+### 2. 在回填路径中加入同步钩子
+
+在读完数据库之后、写入缓存之前加一行调用。只有设置了 `CAWIT_SYNC_URL` 且测试启用它时才会生效（`NODE_ENV=production` 下除非设置 `CAWIT_ALLOW_PRODUCTION=1`，否则保持关闭）。
 
 ```ts
+import * as cawit from "cawit-hook";
+
 const row = await db.findOne(id);
-await cawit.syncPoint("refill:after-read", key);   // 未被 cawit 启用时不做任何事
+await cawit.syncPoint("refill:after-read", key);
 await cache.set(key, serialize(row));
 ```
 
-### 2. 运行场景
+### 3. 描述竞态并运行
+
+```yaml
+# stale-set.yaml
+name: stale-set
+runs: 20
+apps: { a: "http://127.0.0.1:3000", b: "http://127.0.0.1:3001" }
+redis: redis://127.0.0.1:6379
+postgres: "host=127.0.0.1 user=postgres password=postgres dbname=app"
+requests:
+  update: { method: PATCH, path: /articles/1, json: { title: "${value}" } }
+  read:   { method: GET,   path: /articles/1 }
+state:
+  db_query: "select title from articles where id = 1"
+  app_view: { app: a, request: read, field: /title, hit_header: x-cache }
+pattern:
+  stale-set: { reader: a, writer: b, write: update, read: read, key: /articles/1 }
+```
 
 ```bash
-# 强制触发 20 次 stale-set 竞态；只要有一次留下陈旧值，退出码为 1
-cawit verify stale-set.yaml --runs 20 --junit report.xml
+# 以 CAWIT_SYNC_URL=redis://127.0.0.1:6379 启动应用，然后：
+cawit verify stale-set.yaml --junit report.xml   # 只要有一轮留下陈旧值，退出码为 1
+cawit verify stale-set.yaml --show-steps          # 查看模式展开后的步骤
 ```
 
 每一轮按以下顺序进行：
@@ -64,12 +91,12 @@ cawit verify stale-set.yaml --runs 20 --junit report.xml
 2. 启用钩子并通过 A 读取：A 未命中，读取数据库后停在钩子处；
 3. 通过服务器 B 写入更新的值（提交并失效）；
 4. 放行 A，A 写入它读到的值；
-5. 比对 Redis 与 PostgreSQL；
-6. 再读一次，检查缓存是否回填为当前值（修复不能让缓存彻底失效）。
+5. 检查读者拿到的是数据库已提交的值；
+6. 检查缓存会以当前值重新回填（修复不能让缓存彻底失效）。
 
-没有到达钩子的轮次会被丢弃，不计为通过。
+没有到达钩子、或暂停已超时的轮次会被丢弃，不计为通过。模式、步骤与判定：[`docs/scenarios.md`](../scenarios.md)（英文）。
 
-### 3. 查看结果
+### 4. 查看结果
 
 ```
 stale-set（20 轮，每轮都到达了钩子）
@@ -106,7 +133,7 @@ stale-set（20 轮，每轮都到达了钩子）
 
 - **🎯 确定性复现：** 已知的缓存竞态模式，每次都以相同顺序触发
 - **✅ 修复验证：** 修复前失败、修复后通过，并检查缓存仍能回填
-- **🧪 场景库：** stale-set、提交前失效、失效失败、副本延迟回填
+- **🧪 内置模式：** stale-set、失效失败（故障注入）、提交前失效；副本延迟回填为计划中
 - **🔍 操纵检查：** 未到达钩子的轮次会被丢弃
 - **🧾 基于顺序的解释（计划中）：** 失败的轮次附带提交、删除、写入的观测顺序。目前失败轮次会给出读者拿到的值与数据库中的值
 - **👀 辅助功能，check 模式（无需修改应用代码）：** 通过观察 Redis 与 PostgreSQL WAL 确认陈旧的缓存状态

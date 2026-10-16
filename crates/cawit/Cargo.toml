@@ -4,6 +4,12 @@ description = "CacheWitness: force cache races in a fixed order and prove the fi
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
 
 [[bin]]
 name = "cawit"
@@ -11,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-cawit-verify = { path = "../cawit-verify" }
+cawit-verify = { path = "../cawit-verify", version = "0.1.0" }
 clap.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

@@ -39,37 +39,64 @@ The safe patterns are known (leases, versioned invalidation markers), and **so a
 
 ## Quick Start
 
-> Early stage: the runner (`cawit verify`) and the Node hook (`hooks/node`) work, and `lab/twenty/verify.sh` runs this flow against Twenty CRM ([`lab/twenty/scenarios/stale-set.yaml`](lab/twenty/scenarios/stale-set.yaml)). Nothing is published to crates.io or npm yet.
+> v0.1 is not published yet. Until it is, build the runner with `cargo build --release` and use the hook from [`hooks/node`](hooks/node). Working examples against real applications: [`lab/twenty/`](lab/twenty/) (Twenty CRM) and [`lab/directus/`](lab/directus/) (Directus).
 
-### 1. Add the sync hook to your refill path
+### 1. Install
 
-One call, right after the database read and before the cache write. It does nothing unless a test arms it.
+```bash
+cargo install cawit                 # the runner, a single binary
+npm install --save-dev cawit-hook   # the hook, no dependencies
+```
+
+### 2. Add the sync hook to your refill path
+
+One call, right after the database read and before the cache write. It does nothing unless `CAWIT_SYNC_URL` is set and a test arms it (and stays off under `NODE_ENV=production` unless `CAWIT_ALLOW_PRODUCTION=1`).
 
 ```ts
+import * as cawit from "cawit-hook";
+
 const row = await db.findOne(id);
-await cawit.syncPoint("refill:after-read", key);   // no-op unless armed by cawit
+await cawit.syncPoint("refill:after-read", key);
 await cache.set(key, serialize(row));
 ```
 
-### 2. Run a scenario
+### 3. Describe the race and run it
+
+```yaml
+# stale-set.yaml
+name: stale-set
+runs: 20
+apps: { a: "http://127.0.0.1:3000", b: "http://127.0.0.1:3001" }
+redis: redis://127.0.0.1:6379
+postgres: "host=127.0.0.1 user=postgres password=postgres dbname=app"
+requests:
+  update: { method: PATCH, path: /articles/1, json: { title: "${value}" } }
+  read:   { method: GET,   path: /articles/1 }
+state:
+  db_query: "select title from articles where id = 1"
+  app_view: { app: a, request: read, field: /title, hit_header: x-cache }
+pattern:
+  stale-set: { reader: a, writer: b, write: update, read: read, key: /articles/1 }
+```
 
 ```bash
-# Force a stale-set race 20 times; exit code 1 if any run leaves a stale value
-cawit verify stale-set.yaml --runs 20 --junit report.xml
+# start the app with CAWIT_SYNC_URL=redis://127.0.0.1:6379, then:
+cawit verify stale-set.yaml --junit report.xml   # exit 1 if any run leaves a stale value
+cawit verify stale-set.yaml --show-steps          # see what the pattern does
 ```
 
 Each run:
 
 1. writes through server A (commits and invalidates),
 2. arms the hook and reads through A: A misses, reads the database, and stops at the hook,
-3. writes a newer value through server B (commits and invalidates),
+3. writes a newer value through B (commits and invalidates),
 4. releases A, which writes what it read,
-5. compares Redis with PostgreSQL,
-6. reads once more and checks that the cache refills with the current value (a fix must not stop caching altogether).
+5. checks that readers get what the database committed,
+6. checks that the cache refills with the current value (a fix must not stop caching altogether).
 
-A run that never reached the hook is discarded, not counted as a pass.
+A run that never reached the hook, or whose hold timed out, is discarded, not counted as a pass. Patterns, steps, and verdicts: [`docs/scenarios.md`](docs/scenarios.md).
 
-### 3. Read the result
+### 4. Read the result
 
 ```
 stale-set (20 runs, every run reached the hook)
@@ -106,7 +133,7 @@ The verdict is simple: does Redis hold what the database committed, and does the
 
 - **🎯 Deterministic reproduction:** known cache race patterns, triggered in the same order every run
 - **✅ Fix verification:** fails before the fix, passes after it, and checks the cache still refills
-- **🧪 Scenario library:** stale-set, invalidate-before-commit, failed invalidation, replica-lag refill
+- **🧪 Built-in patterns:** stale-set, failed invalidation (fault injection), invalidate-before-commit; replica-lag refill planned
 - **🔍 Manipulation check:** runs that never reached the hook are discarded
 - **🧾 Explanations from order (planned):** failed runs come with the observed sequence of commits, deletes, and writes. Today a failed run reports what readers got and what the database holds
 - **👀 Secondary: check mode** (no code changes): confirms stale cache state by watching Redis and the PostgreSQL WAL
