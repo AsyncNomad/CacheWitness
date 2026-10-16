@@ -10,6 +10,25 @@
 
 </div>
 
+<p align="center">
+  <a href="https://asyncnomad.github.io/CacheWitness/ko/">
+    <img src="https://img.shields.io/badge/📖_프로젝트-문서-blue?style=for-the-badge" alt="Documentation">
+  </a>
+  &nbsp;
+  <a href="https://asyncnomad.github.io/CacheWitness/api/cawit_verify/index.html">
+    <img src="https://img.shields.io/badge/⚙️_Rust-API_문서-orange?style=for-the-badge&logo=rust" alt="Rust API Docs">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml"><img src="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/cawit"><img src="https://img.shields.io/crates/v/cawit?logo=rust&label=crates.io" alt="crates.io"></a>
+  <a href="https://www.npmjs.com/package/cawit-hook"><img src="https://img.shields.io/npm/v/cawit-hook?logo=npm&label=cawit-hook" alt="npm"></a>
+  <a href="https://docs.rs/cawit-verify"><img src="https://img.shields.io/docsrs/cawit-verify?logo=docsdotrs&label=docs.rs" alt="docs.rs"></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust 1.85+">
+</p>
+
 ---
 
 ## 소개 (Introduction)
@@ -184,10 +203,19 @@ stale-set (20회, 모든 회차가 훅에 도달)
 
 ## 문서 (Documentation)
 
-| 문서 | 내용 |
+전체 문서는 **[asyncnomad.github.io/CacheWitness/ko](https://asyncnomad.github.io/CacheWitness/ko/)**에 있습니다([English](https://asyncnomad.github.io/CacheWitness/), [简体中文](https://asyncnomad.github.io/CacheWitness/zh/)). 원본은 [`docs/book/`](../book/)에 있습니다.
+
+| 여기서 시작 | |
 |---|---|
-| [`docs/PLAN.md`](../PLAN.md) | 개발 계획: 제품 정의, 설계, 단계별 관문, 기각한 대안 |
-| [`docs/design/experiments-summary.md`](../design/experiments-summary.md) | 지금까지의 모든 실험과 그로 인해 바뀐 것 |
+| [시작하기](../book/ko/src/getting-started.md) | 훅을 넣고, 시나리오를 쓰고, 경쟁을 재현하고, 수정을 증명 |
+| [경쟁 패턴](../book/ko/src/guide/patterns.md) | 내장 경쟁과 다이어그램, 그리고 그것을 견디는 수정 |
+| [시나리오 형식](../book/ko/src/reference/scenario-format.md) | 모든 키, 단계, 판정, 패턴 매개변수 |
+| [훅 프로토콜](../book/ko/src/reference/hook-protocol.md) | 다른 언어의 훅을 위한 Redis 프로토콜 |
+| [사례 연구](../book/ko/src/case-studies/directus.md) | Twenty CRM과 Directus의 결과 |
+| [Rust API](https://asyncnomad.github.io/CacheWitness/api/cawit_verify/index.html) | `cawit-verify`, `cawit-resp`의 rustdoc (영어) |
+| [기여하기](../../CONTRIBUTING.md) · [보안](../../SECURITY.md) · [변경 기록](../../CHANGELOG.md) | 영어 |
+| [`docs/PLAN.md`](../PLAN.md), [`docs/design/`](../design/) | 개발 계획, 설계 메모, 실험 기록 |
+
 
 ---
 

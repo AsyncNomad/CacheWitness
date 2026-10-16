@@ -10,6 +10,25 @@
 
 </div>
 
+<p align="center">
+  <a href="https://asyncnomad.github.io/CacheWitness/zh/">
+    <img src="https://img.shields.io/badge/📖_项目-文档-blue?style=for-the-badge" alt="Documentation">
+  </a>
+  &nbsp;
+  <a href="https://asyncnomad.github.io/CacheWitness/api/cawit_verify/index.html">
+    <img src="https://img.shields.io/badge/⚙️_Rust-API_文档-orange?style=for-the-badge&logo=rust" alt="Rust API Docs">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml"><img src="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/cawit"><img src="https://img.shields.io/crates/v/cawit?logo=rust&label=crates.io" alt="crates.io"></a>
+  <a href="https://www.npmjs.com/package/cawit-hook"><img src="https://img.shields.io/npm/v/cawit-hook?logo=npm&label=cawit-hook" alt="npm"></a>
+  <a href="https://docs.rs/cawit-verify"><img src="https://img.shields.io/docsrs/cawit-verify?logo=docsdotrs&label=docs.rs" alt="docs.rs"></a>
+  <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust 1.85+">
+</p>
+
 ---
 
 ## 简介 (Introduction)
@@ -184,10 +203,19 @@ stale-set（20 轮，每轮都到达了钩子）
 
 ## 文档 (Documentation)
 
-| 文档 | 内容 |
+完整文档位于 **[asyncnomad.github.io/CacheWitness/zh](https://asyncnomad.github.io/CacheWitness/zh/)**（[English](https://asyncnomad.github.io/CacheWitness/)、[한국어](https://asyncnomad.github.io/CacheWitness/ko/)）。源文件在 [`docs/book/`](../book/)。
+
+| 从这里开始 | |
 |---|---|
-| [`docs/PLAN.md`](../PLAN.md) | 开发计划（韩文）：产品定义、设计、分阶段关卡、被否决的方案 |
-| [`docs/design/experiments-summary.md`](../design/experiments-summary.md) | 迄今为止的所有实验及其带来的改变（韩文） |
+| [快速开始](../book/zh/src/getting-started.md) | 加入钩子、编写场景、复现竞态、证明修复 |
+| [竞态模式](../book/zh/src/guide/patterns.md) | 内置竞态及其图示，以及哪些修复能经受住它们 |
+| [场景格式](../book/zh/src/reference/scenario-format.md) | 所有键、步骤、检查和模式参数 |
+| [钩子协议](../book/zh/src/reference/hook-protocol.md) | 供其他语言钩子使用的 Redis 协议 |
+| [案例研究](../book/zh/src/case-studies/directus.md) | Twenty CRM 和 Directus 的结果 |
+| [Rust API](https://asyncnomad.github.io/CacheWitness/api/cawit_verify/index.html) | `cawit-verify` 和 `cawit-resp` 的 rustdoc（英文） |
+| [参与贡献](../../CONTRIBUTING.md) · [安全](../../SECURITY.md) · [变更日志](../../CHANGELOG.md) | 英文 |
+| [`docs/PLAN.md`](../PLAN.md)、[`docs/design/`](../design/) | 开发计划、设计笔记和实验记录（韩文） |
+
 
 ---
 

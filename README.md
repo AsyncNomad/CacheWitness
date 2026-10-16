@@ -10,6 +10,25 @@
 
 </div>
 
+<p align="center">
+  <a href="https://asyncnomad.github.io/CacheWitness/">
+    <img src="https://img.shields.io/badge/📖_Project-Documentation-blue?style=for-the-badge" alt="Documentation">
+  </a>
+  &nbsp;
+  <a href="https://asyncnomad.github.io/CacheWitness/api/cawit_verify/index.html">
+    <img src="https://img.shields.io/badge/⚙️_Rust-API_Docs-orange?style=for-the-badge&logo=rust" alt="Rust API Docs">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml"><img src="https://github.com/AsyncNomad/CacheWitness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/cawit"><img src="https://img.shields.io/crates/v/cawit?logo=rust&label=crates.io" alt="crates.io"></a>
+  <a href="https://www.npmjs.com/package/cawit-hook"><img src="https://img.shields.io/npm/v/cawit-hook?logo=npm&label=cawit-hook" alt="npm"></a>
+  <a href="https://docs.rs/cawit-verify"><img src="https://img.shields.io/docsrs/cawit-verify?logo=docsdotrs&label=docs.rs" alt="docs.rs"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust 1.85+">
+</p>
+
 ---
 
 ## Introduction
@@ -184,10 +203,19 @@ Stopping code at a named point to force an order is not new. What CacheWitness a
 
 ## Documentation
 
-| Document | Contents |
+The full documentation is at **[asyncnomad.github.io/CacheWitness](https://asyncnomad.github.io/CacheWitness/)** (English, [한국어](https://asyncnomad.github.io/CacheWitness/ko/), [简体中文](https://asyncnomad.github.io/CacheWitness/zh/)). Sources live in [`docs/book/`](docs/book/).
+
+| Start here | |
 |---|---|
-| [`docs/PLAN.md`](docs/PLAN.md) | Development plan (Korean): product definition, design, phase gates, rejected alternatives |
-| [`docs/design/experiments-summary.md`](docs/design/experiments-summary.md) | Every experiment so far and what it changed (Korean) |
+| [Getting Started](docs/book/en/src/getting-started.md) | Add the hook, write a scenario, reproduce the race, prove the fix |
+| [Race Patterns](docs/book/en/src/guide/patterns.md) | The built-in races, with diagrams, and which fixes survive them |
+| [Scenario Format](docs/book/en/src/reference/scenario-format.md) | Every key, step, check, and pattern parameter |
+| [Hook Protocol](docs/book/en/src/reference/hook-protocol.md) | The Redis protocol, for hooks in other languages |
+| [Case studies](docs/book/en/src/case-studies/directus.md) | Twenty CRM and Directus, with results |
+| [Rust API](https://asyncnomad.github.io/CacheWitness/api/cawit_verify/index.html) | rustdoc for `cawit-verify` and `cawit-resp` |
+| [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) | |
+| [`docs/PLAN.md`](docs/PLAN.md), [`docs/design/`](docs/design/) | Development plan, design notes, and experiment records (Korean) |
+
 
 ---
 
