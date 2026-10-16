@@ -26,6 +26,9 @@ enum Command {
         /// Write the full report as JSON to this path.
         #[arg(long)]
         out: Option<PathBuf>,
+        /// Write a JUnit XML report (one test case per run) to this path.
+        #[arg(long)]
+        junit: Option<PathBuf>,
     },
 }
 
@@ -45,7 +48,7 @@ fn print_run(r: &RunResult) {
     }
 }
 
-async fn verify(scenario: PathBuf, runs: Option<u32>, out: Option<PathBuf>) -> Result<i32> {
+async fn verify(scenario: PathBuf, runs: Option<u32>, out: Option<PathBuf>, junit: Option<PathBuf>) -> Result<i32> {
     let sc = cawit_verify::Scenario::load(&scenario)?;
     let report = cawit_verify::run(&sc, &Options { runs }, print_run).await?;
     let mut per_check: Vec<(String, usize, usize)> = Vec::new();
@@ -76,6 +79,9 @@ async fn verify(scenario: PathBuf, runs: Option<u32>, out: Option<PathBuf>) -> R
     if let Some(path) = out {
         std::fs::write(&path, serde_json::to_vec_pretty(&report)?).with_context(|| format!("writing {}", path.display()))?;
     }
+    if let Some(path) = junit {
+        std::fs::write(&path, report.junit()).with_context(|| format!("writing {}", path.display()))?;
+    }
     Ok(report.exit_code())
 }
 
@@ -83,7 +89,7 @@ async fn verify(scenario: PathBuf, runs: Option<u32>, out: Option<PathBuf>) -> R
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Verify { scenario, runs, out } => verify(scenario, runs, out).await,
+        Command::Verify { scenario, runs, out, junit } => verify(scenario, runs, out, junit).await,
     };
     match result {
         Ok(code) => ExitCode::from(code as u8),

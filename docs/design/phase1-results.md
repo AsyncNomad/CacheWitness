@@ -380,7 +380,7 @@ Twenty 엔티티 캐시의 미스 경로(`recomputeFromProvider`)는 DB를 읽�
 
 ### 5.8 결정적 재현과 수정 검증 (동기화 지점)
 
-확률 방식은 실행마다 결과가 갈려서, 수정 전에도 0건이 나올 수 있었다(양성 대조 불안정). 그래서 순서를 강제하는 **동기화 지점**으로 같은 경쟁을 매번 재현하고, 수정 후보를 검증했다 (`lab/twenty/sync.sh`, `sync-scenario.js`, `refill-delay.patch`의 `CW_SYNC`·`CW_FIX`).
+확률 방식은 실행마다 결과가 갈려서, 수정 전에도 0건이 나올 수 있었다(양성 대조 불안정). 그래서 순서를 강제하는 **동기화 지점**으로 같은 경쟁을 매번 재현하고, 수정 후보를 검증했다 (당시 `lab/twenty/sync.sh`, `sync-scenario.js`, `refill-delay.patch`의 `CW_SYNC`·`CW_FIX`. 2단계에서 `cawit verify`와 `lab/twenty/verify.sh`로 대체했고 원본은 git 기록에 있다).
 
 **한 회차의 순서**
 1. 서버 A에 rename → A가 커밋하고 무효화한다. A의 메모이저도 비워진다.

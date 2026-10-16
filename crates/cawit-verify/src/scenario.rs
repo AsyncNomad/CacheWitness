@@ -41,6 +41,10 @@ pub struct RequestTemplate {
     pub headers: BTreeMap<String, String>,
     #[serde(default)]
     pub json: Option<serde_json::Value>,
+    /// Treat the response as failed if its JSON body has this top-level field
+    /// (e.g. `errors` for GraphQL, which reports errors with HTTP 200).
+    #[serde(default)]
+    pub error_field: Option<String>,
 }
 
 fn post() -> String {

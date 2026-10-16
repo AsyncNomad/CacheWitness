@@ -17,39 +17,17 @@ Regenerate with lab/make-patch.sh, which keeps this header. git apply ignores
 the text before the first "diff --git" line.
 
 diff --git a/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts b/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
-index e78354be..4d7dfbee 100644
+index e78354be..2556397a 100644
 --- a/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
 +++ b/packages/twenty-server/src/engine/core-entity-cache/services/core-entity-cache.service.ts
-@@ -3,6 +3,8 @@ import { DiscoveryService, Reflector } from '@nestjs/core';
- 
- import crypto from 'crypto';
- 
-+import { createClient } from 'redis';
-+
- import { isDefined, isValidUuid } from 'twenty-shared/utils';
- 
- import { CoreEntityCacheProvider } from 'src/engine/core-entity-cache/interfaces/core-entity-cache-provider.service';
-@@ -29,6 +31,55 @@ const MAX_LOCAL_CACHE_ENTRIES = 5_000;
+@@ -29,6 +29,42 @@ const MAX_LOCAL_CACHE_ENTRIES = 5_000;
  const MIN_EVICT_KEYS = 100;
  
  const NOT_FOUND_SENTINEL = '__CORE_ENTITY_NOT_FOUND__';
 +
-+// CacheWitness lab patch: deterministic sync point (test only). When
-+// CW_SYNC=1, the first workspace refill after the runner sets cw:sync:arm
-+// stops right after its DB read, signals cw:sync:reached, and waits for
-+// cw:sync:release, so a runner can commit and invalidate in between.
-+let cwSyncClient: ReturnType<typeof createClient> | undefined;
-+const cwSyncPoint = async (cacheKeyName: string) => {
-+  if (process.env.CW_SYNC !== '1' || cacheKeyName !== 'workspaceEntity') return;
-+  if (!cwSyncClient) {
-+    cwSyncClient = createClient({ url: process.env.REDIS_URL || 'redis://localhost:6379' });
-+    await cwSyncClient.connect();
-+  }
-+  const armed = await cwSyncClient.getDel('cw:sync:arm');
-+  if (!armed) return;
-+  await cwSyncClient.rPush('cw:sync:reached', '1');
-+  await cwSyncClient.blPop('cw:sync:release', 30);
-+};
++// CacheWitness sync hook (test only): a no-op unless CAWIT_SYNC_URL is set.
++// eslint-disable-next-line @typescript-eslint/no-require-imports
++const cawit = require('cawit-hook');
 +
 +// CacheWitness lab patch: candidate fixes for the stale-set race (test only),
 +// chosen with CW_FIX. 'vcas' writes only if the cached copy is not newer
@@ -85,7 +63,7 @@ index e78354be..4d7dfbee 100644
  type CacheDataType = CoreEntityCacheDataMap[CoreEntityCacheKeyName];
  type CacheableValue = CacheDataType | typeof NOT_FOUND_SENTINEL;
  
-@@ -178,9 +229,37 @@ export class CoreEntityCacheService implements OnModuleInit {
+@@ -178,9 +214,37 @@ export class CoreEntityCacheService implements OnModuleInit {
    private async recomputeFromProvider(
      entityId: string,
      cacheKeyName: CoreEntityCacheKeyName,
@@ -101,7 +79,7 @@ index e78354be..4d7dfbee 100644
 +      await cwStorage.cache.store.client.set(cwStorage.getKey(`${cwLocalKey}:lease`), cwLease, { PX: 30000 });
 +    }
      const data = await provider.computeForCache(entityId);
-+    await cwSyncPoint(cacheKeyName);
++    await cawit.syncPoint('refill:after-read', `${cacheKeyName}:${entityId}`);
 +    // CacheWitness lab patch (test only): emulate a slow refill between the DB
 +    // read and the cache write. Off unless CW_REFILL_DELAY_MS is set; with
 +    // CW_REFILL_JITTER=1 each refill waits a uniform random 0..ms instead.
@@ -123,7 +101,7 @@ index e78354be..4d7dfbee 100644
      const hash = crypto.randomUUID();
  
      const valueToCache: CacheableValue =
-@@ -188,10 +267,35 @@ export class CoreEntityCacheService implements OnModuleInit {
+@@ -188,10 +252,35 @@ export class CoreEntityCacheService implements OnModuleInit {
  
      const localKey = this.buildCacheKey(entityId, cacheKeyName);
  
@@ -163,7 +141,7 @@ index e78354be..4d7dfbee 100644
  
      this.setInLocalCache(entityId, cacheKeyName, valueToCache, hash);
  
-@@ -204,7 +308,11 @@ export class CoreEntityCacheService implements OnModuleInit {
+@@ -204,7 +293,11 @@ export class CoreEntityCacheService implements OnModuleInit {
    ): Promise<void> {
      const localKey = this.buildCacheKey(entityId, cacheKeyName);
  

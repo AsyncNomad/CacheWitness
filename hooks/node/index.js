@@ -3,7 +3,7 @@
 //
 // syncPoint(point, key) is a no-op unless CAWIT_SYNC_URL is set. When a
 // scenario has armed `point`, the first call to reach it takes the arm
-// (GETDEL, so only one call is held), signals cawit:reached:<token>, and waits
+// (atomically, so only one call is held), signals cawit:reached:<token>, and waits
 // on cawit:release:<token>. The hook uses its own Redis connection: BLPOP
 // blocks the connection, and blocking the app's cache connection would delay
 // unrelated commands.
@@ -95,19 +95,23 @@ function connection() {
   return conn;
 }
 
+// Take the arm only if it is for this key (or any key), in one step: a
+// GETDEL-then-put-back would leave a gap in which the intended caller finds
+// no arm.
+const TAKE = `
+local v = redis.call('GET', KEYS[1])
+if not v then return false end
+local sep = string.find(v, '|', 1, true)
+local want = sep and string.sub(v, sep + 1) or '*'
+if want ~= '*' and want ~= ARGV[1] then return false end
+redis.call('DEL', KEYS[1])
+return sep and string.sub(v, 1, sep - 1) or v`;
+
 async function syncPoint(point, key = '*') {
   if (!ENABLED) return;
   const c = connection();
-  const armKey = `cawit:arm:${point}`;
-  const armed = await c.cmd('GETDEL', armKey);
-  if (armed === null) return;
-  const sep = armed.indexOf('|');
-  const token = sep < 0 ? armed : armed.slice(0, sep);
-  const want = sep < 0 ? '*' : armed.slice(sep + 1);
-  if (want !== '*' && want !== key) {
-    await c.cmd('SET', armKey, armed, 'PX', '30000'); // not ours: put it back
-    return;
-  }
+  const token = await c.cmd('EVAL', TAKE, '1', `cawit:arm:${point}`, key);
+  if (token === null) return;
   await c.cmd('RPUSH', `cawit:reached:${token}`, JSON.stringify({ point, key, pid: process.pid }));
   const released = await c.cmd('BLPOP', `cawit:release:${token}`, String(TIMEOUT_S));
   if (released === null) await c.cmd('RPUSH', `cawit:timeout:${token}`, String(process.pid));

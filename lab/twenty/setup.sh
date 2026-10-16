@@ -7,7 +7,7 @@
 # Run it only with the maintainer's approval.
 #
 # Usage: lab/twenty/setup.sh [checkout dir]   (default: ~/code/cw-targets/twenty)
-# Then build + seed with: RESET=1 FIX=none N=1 lab/twenty/sync.sh <checkout dir>
+# Then build + seed with: RESET=1 FIX=none N=1 lab/twenty/verify.sh <checkout dir>
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 DIR=${1:-$HOME/code/cw-targets/twenty}
@@ -22,7 +22,7 @@ if [ "$(git -C "$DIR" rev-parse HEAD 2>/dev/null)" != "$COMMIT" ]; then
   git -C "$DIR" fetch -q --depth 1 origin "$COMMIT"
   git -C "$DIR" checkout -q FETCH_HEAD
 fi
-# Apply the test patch (sync point, refill delays, candidate fixes) once.
+# Apply the test patch (cawit-hook call, refill delays, candidate fixes) once.
 if git -C "$DIR" apply --check "$ROOT/lab/twenty/refill-delay.patch" 2>/dev/null; then
   git -C "$DIR" apply "$ROOT/lab/twenty/refill-delay.patch"
   echo "patch applied"

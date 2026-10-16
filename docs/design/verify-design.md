@@ -1,6 +1,6 @@
 # verify 엔진 설계 (2단계)
 
-PLAN 13장 2단계의 설계다. 제품 정의(PLAN 0장, 2026-10-16)의 주력 기능인 verify 모드를 만든다. 원형은 1단계 실험의 `lab/twenty/sync.sh`, `sync-scenario.js`, `refill-delay.patch`다 (`docs/design/phase1-results.md` 5.8).
+PLAN 13장 2단계의 설계다. 제품 정의(PLAN 0장, 2026-10-16)의 주력 기능인 verify 모드를 만든다. 원형은 1단계 실험의 `sync.sh`, `sync-scenario.js`(git 기록에만 남음), `refill-delay.patch`다 (`docs/design/phase1-results.md` 5.8).
 
 ## 1. 목표와 관문
 
@@ -25,14 +25,14 @@ PLAN 13장 2단계의 설계다. 제품 정의(PLAN 0장, 2026-10-16)의 주력 
 | 단계 | 누가 | 명령 | 의미 |
 |---|---|---|---|
 | 장전 | 실행기 | `SET cawit:arm:<point> <token>\|<key 또는 *> PX 30000` | 다음에 `<point>`에 도달하는 호출 하나를 붙잡는다. `<key>`를 주면 그 키일 때만 |
-| 소비 | 훅 | `GETDEL cawit:arm:<point>` | 장전 값이 없으면 바로 반환. 키가 맞지 않으면 값을 되돌려 놓고 반환 |
+| 소비 | 훅 | `EVAL` 한 번: 장전 값이 있고 키가 `*`이거나 자기 키와 같을 때만 `DEL`하고 토큰을 받는다 | 아니면 장전을 건드리지 않고 바로 반환 |
 | 도달 알림 | 훅 | `RPUSH cawit:reached:<token> <JSON {point,key,pid}>` | 실행기가 이것을 조작 확인으로 쓴다 |
 | 대기 | 훅 | `BLPOP cawit:release:<token> <초>` | 해제를 기다린다. 시간이 지나면 `RPUSH cawit:timeout:<token>` 후 진행 |
 | 도달 대기 | 실행기 | `BLPOP cawit:reached:<token> <초>` | 시간 안에 오지 않으면 그 회차는 `NOT_REACHED` |
 | 해제 | 실행기 | `RPUSH cawit:release:<token> go` | 붙잡힌 호출을 풀어 준다 |
 
 - **토큰**: 회차마다 새로 만든다. 이전 회차의 남은 신호가 섞이지 않는다.
-- **소비가 원자적이어야 한다**: 동시에 여러 요청이 같은 지점에 와도 붙잡히는 것은 하나다(`GETDEL`).
+- **소비가 원자적이어야 한다**: 동시에 여러 요청이 같은 지점에 와도 붙잡히는 것은 하나다. 키 확인과 삭제도 한 스크립트 안에서 한다. 처음 구현은 `GETDEL`로 가져갔다가 키가 다르면 되돌려 놓았는데, 그 사이에 원래 대상이 오면 장전을 못 보고 지나간다. Twenty처럼 읽기 요청 하나가 여러 엔티티를 동시에 재충전하는 앱에서 생길 수 있는 틈이다.
 - **대기용 연결**: `BLPOP`은 연결을 막으므로 훅은 앱의 캐시 연결이 아닌 **자기 전용 연결**을 쓴다. 앱의 캐시 연결을 막으면 1단계에서 본 head-of-line 문제가 생긴다.
 
 **기각한 대안**
@@ -107,13 +107,30 @@ steps:
 | 1 | `FAIL`이 하나라도 있음 |
 | 2 | `FAIL`은 없지만 `NOT_REACHED`나 `ERROR`가 있음 (판정 불가) |
 
-결과는 회차별 JSON(`--out`)과 사람이 읽는 요약으로 낸다. JUnit은 2단계 안에서 추가한다.
+결과는 사람이 읽는 회차별 출력과 요약, 회차별 JSON(`--out`), JUnit XML(`--junit`, 회차 하나가 테스트 케이스 하나)로 낸다. JUnit에서 `NOT_REACHED`·`ERROR` 회차는 통과도 실패도 아니므로 `skipped`로 적는다.
 
 ## 6. 실행 환경
 
 실행기 바이너리도 실험 환경과 같은 격리 네트워크 안에서 돈다 (`lab/twenty/isolation.sh`). 빌드는 로컬 cargo 캐시만으로(`--offline`) 한다. 새 크레이트가 필요해지면 네트워크 사용 허락을 먼저 받는다.
 
-## 7. 사각지대
+## 7. 첫 대상: Twenty (2026-10-16)
+
+`lab/twenty/scenarios/stale-set.yaml`을 `lab/twenty/verify.sh`로 돌렸다. 서버 두 대, 실행기 바이너리 모두 격리 네임스페이스 안에서 돈다.
+
+- **훅 연결**: `refill-delay.patch` 안의 자체 동기화 지점(`cw:sync:*`, redis 클라이언트 직접 생성)을 `cawit-hook` 호출로 바꿨다. 앱 코드 변경은 4줄(주석 2, `require` 1, `syncPoint` 호출 1)이다. 지점은 `refill:after-read`, 키는 `<엔티티 종류>:<id>`. 실행기는 `workspaceEntity:<id>`로 장전한다. 읽기 요청 하나가 사용자·워크스페이스 등 여러 엔티티를 재충전하므로 키 없이 장전하면 엉뚱한 재충전이 붙잡힐 수 있다.
+- **훅 설치**: 네트워크 없이 `hooks/node`의 세 파일을 대상의 `node_modules/cawit-hook`에 복사한다(`npm install hooks/node`와 같은 결과).
+- **GraphQL 오류**: GraphQL은 오류에도 HTTP 200을 준다. 요청 템플릿에 `error_field: errors`를 둬서 응답에 그 필드가 있으면 `ERROR`로 처리한다.
+
+| 수정 (각 20회) | not_stale | refilled | 결과 | 종료 코드 |
+|---|---|---|---|---|
+| 없음 | 0/20 | 0/20 | FAIL 20 | 1 |
+| 버전 비교 SET (`vcas`) | 0/20 | 0/20 | FAIL 20 | 1 |
+| 리스 | 20/20 | 0/20 | FAIL 20 | 1 |
+| 리스 + 거부 시 다시 읽기 | 20/20 | 20/20 | PASS 20 | 0 |
+
+모든 회차가 훅에 도달했다(`NOT_REACHED` 0). 1단계 `sync.sh` 결과와 같다. 관문 중 Twenty 몫(수정 전 매번 실패, 올바른 수정 매번 통과, 틀린 수정 두 개 판별, 훅 10줄 이내)은 충족했고, 두 번째 Node/TS 대상이 남았다.
+
+## 8. 사각지대
 
 - 훅은 **알려 준 지점**에서만 순서를 통제한다. 재충전 경로가 여러 개면 지점도 여러 개 걸어야 한다. 빠뜨린 경로는 시험되지 않는다.
 - 시나리오의 판정은 "그 키의 최종 상태"다. 프로세스 안 캐시(L1, 메모이저)가 낡은 값을 응답하는 문제는 "다시 채워지는가" 검사로 간접적으로만 잡는다. 1단계에서 리스만 넣은 수정이 이렇게 잡혔다.

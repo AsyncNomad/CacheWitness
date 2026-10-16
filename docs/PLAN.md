@@ -280,7 +280,7 @@ t4  conn A  SET k v1
 
 ### 7.2 verify 모드의 구성
 
-1단계 실험(`lab/twenty/sync.sh`, `sync-scenario.js`)이 원형이다.
+1단계 실험(`sync.sh`, `sync-scenario.js`, 지금은 git 기록에만 있음)이 원형이고, 2단계에서 `cawit verify` + `lab/twenty/verify.sh`로 대체했다.
 
 - **동기화 훅**: 앱의 캐시 재충전 경로에서 "DB를 읽은 직후"에 거는 함수 하나 (`cawit.syncPoint("refill:after-read", key)`). 평소에는 아무것도 하지 않고, 실행기가 장전했을 때만 신호를 보내고 해제를 기다린다. 신호는 테스트용 Redis 리스트로 주고받는다(언어와 무관). 첫 대상은 Node/TS, 다음은 Python.
 - **시나리오 실행기**: 요청과 대기를 순서대로 적은 시나리오를 실행한다. 예: "서버 A에 쓰기 → 장전 → A에 읽기 → 훅 도달 대기 → 서버 B에 쓰기 → 해제 → 판정 → 한 번 더 읽고 재충전 확인". 기본 시나리오 라이브러리(stale-set, 커밋 전 무효화, 무효화 실패 후 미회복, 레플리카 지연 재충전)를 제공한다.

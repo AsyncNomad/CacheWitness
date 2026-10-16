@@ -39,7 +39,7 @@
 
 ## 빠른 시작 (Quick Start)
 
-> 아래는 계획된 인터페이스입니다. 현재는 프로토타입 단계이며, `lab/twenty/`의 실험 스크립트가 같은 흐름을 Twenty CRM에 대해 구현하고 있습니다.
+> 초기 단계입니다. 실행기(`cawit verify`)와 Node 훅(`hooks/node`)은 동작하며, `lab/twenty/verify.sh`가 이 흐름을 Twenty CRM에 대해 돌립니다([`lab/twenty/scenarios/stale-set.yaml`](../../lab/twenty/scenarios/stale-set.yaml)). crates.io·npm 배포는 아직입니다.
 
 ### 1. 재충전 경로에 동기화 훅 걸기
 
@@ -55,7 +55,7 @@ await cache.set(key, serialize(row));
 
 ```bash
 # stale-set 경쟁을 20회 강제한다. 한 번이라도 낡은 값이 남으면 종료 코드 1
-cawit verify stale-set --config cawit.yaml --runs 20
+cawit verify stale-set.yaml --runs 20 --junit report.xml
 ```
 
 각 회차는 다음 순서로 진행됩니다.

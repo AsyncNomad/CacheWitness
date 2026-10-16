@@ -55,6 +55,47 @@ impl Report {
     }
 }
 
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+impl Report {
+    /// JUnit XML: one test case per run. Failed runs are failures; runs that
+    /// did not reach a sync point or errored are reported as skipped, since
+    /// they neither pass nor fail the fix.
+    pub fn junit(&self) -> String {
+        let name = xml_escape(&self.scenario);
+        let skipped = self.count(Outcome::NotReached) + self.count(Outcome::Error);
+        let mut x = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuite name=\"{name}\" tests=\"{}\" failures=\"{}\" skipped=\"{skipped}\">\n",
+            self.runs.len(),
+            self.count(Outcome::Fail)
+        );
+        for r in &self.runs {
+            x += &format!("  <testcase classname=\"{name}\" name=\"run {}\">\n", r.run);
+            let detail: Vec<String> = r
+                .expectations
+                .iter()
+                .map(|e| format!("{} {} ({}): {}", if e.pass { "ok" } else { "FAIL" }, e.name, e.check, e.detail))
+                .chain(r.note.clone())
+                .collect();
+            let detail = xml_escape(&detail.join("\n"));
+            match r.outcome {
+                Outcome::Pass => {}
+                Outcome::Fail => {
+                    let failed: Vec<&str> = r.expectations.iter().filter(|e| !e.pass).map(|e| e.name.as_str()).collect();
+                    x += &format!("    <failure message=\"{}\">{detail}</failure>\n", xml_escape(&failed.join(", ")));
+                }
+                Outcome::NotReached | Outcome::Error => {
+                    x += &format!("    <skipped message=\"{:?}\">{detail}</skipped>\n", r.outcome);
+                }
+            }
+            x += "  </testcase>\n";
+        }
+        x + "</testsuite>\n"
+    }
+}
+
 pub struct Options {
     pub runs: Option<u32>,
 }
@@ -135,5 +176,39 @@ async fn cleanup(ctx: &mut RunCtx<'_>) {
     }
     for (_, task) in std::mem::take(&mut ctx.tasks) {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(10), task).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(i: u32, outcome: Outcome) -> RunResult {
+        let pass = outcome != Outcome::Fail;
+        RunResult {
+            run: i,
+            outcome,
+            expectations: vec![Expectation { name: "not_stale".into(), check: "cache_not_stale".into(), pass, detail: "cache=<a> db=b".into() }],
+            note: None,
+        }
+    }
+
+    #[test]
+    fn exit_codes() {
+        let r = |o: Vec<Outcome>| Report { scenario: "s".into(), runs: o.into_iter().enumerate().map(|(i, o)| run(i as u32, o)).collect() };
+        assert_eq!(r(vec![Outcome::Pass, Outcome::Pass]).exit_code(), 0);
+        assert_eq!(r(vec![Outcome::Pass, Outcome::Fail, Outcome::NotReached]).exit_code(), 1);
+        assert_eq!(r(vec![Outcome::Pass, Outcome::NotReached]).exit_code(), 2);
+        assert_eq!(r(vec![]).exit_code(), 2);
+    }
+
+    #[test]
+    fn junit_marks_failures_and_skips_and_escapes() {
+        let rep = Report { scenario: "s".into(), runs: vec![run(1, Outcome::Pass), run(2, Outcome::Fail), run(3, Outcome::NotReached)] };
+        let x = rep.junit();
+        assert!(x.contains(r#"tests="3" failures="1" skipped="1""#));
+        assert!(x.contains(r#"<failure message="not_stale">"#));
+        assert!(x.contains("cache=&lt;a&gt;"));
+        assert!(x.contains("<skipped"));
     }
 }

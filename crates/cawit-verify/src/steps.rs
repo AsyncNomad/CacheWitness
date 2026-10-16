@@ -139,10 +139,18 @@ impl Step for HttpStep {
                 None => None,
             };
             let method = tpl.method.clone();
+            let error_field = tpl.error_field.clone();
             let fut = async move {
                 let resp = http::request(&base, &method, &path, &headers, body).await?;
+                let text = || String::from_utf8_lossy(&resp.body).chars().take(300).collect::<String>();
                 if resp.status >= 400 {
-                    bail!("HTTP {} from {base}{path}: {}", resp.status, String::from_utf8_lossy(&resp.body));
+                    bail!("HTTP {} from {base}{path}: {}", resp.status, text());
+                }
+                if let Some(field) = &error_field {
+                    let v: serde_json::Value = serde_json::from_slice(&resp.body).unwrap_or_default();
+                    if v.get(field).is_some_and(|e| !e.is_null()) {
+                        bail!("`{field}` in response from {base}{path}: {}", text());
+                    }
                 }
                 Ok(resp)
             };

@@ -39,7 +39,7 @@
 
 ## 快速开始 (Quick Start)
 
-> 以下为规划中的接口。项目目前处于原型阶段，`lab/twenty/` 下的实验脚本已针对 Twenty CRM 实现了同样的流程。
+> 早期阶段：执行器（`cawit verify`）和 Node 钩子（`hooks/node`）已可运行，`lab/twenty/verify.sh` 针对 Twenty CRM 运行这一流程（[`lab/twenty/scenarios/stale-set.yaml`](../../lab/twenty/scenarios/stale-set.yaml)）。尚未发布到 crates.io 或 npm。
 
 ### 1. 在回填路径中加入同步钩子
 
@@ -55,7 +55,7 @@ await cache.set(key, serialize(row));
 
 ```bash
 # 强制触发 20 次 stale-set 竞态；只要有一次留下陈旧值，退出码为 1
-cawit verify stale-set --config cawit.yaml --runs 20
+cawit verify stale-set.yaml --runs 20 --junit report.xml
 ```
 
 每一轮按以下顺序进行：

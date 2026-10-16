@@ -39,7 +39,7 @@ The safe patterns are known (leases, versioned invalidation markers), and **so a
 
 ## Quick Start
 
-> The interface below is planned. The project is at the prototype stage; the lab scripts under `lab/twenty/` implement the same flow against Twenty CRM.
+> Early stage: the runner (`cawit verify`) and the Node hook (`hooks/node`) work, and `lab/twenty/verify.sh` runs this flow against Twenty CRM ([`lab/twenty/scenarios/stale-set.yaml`](lab/twenty/scenarios/stale-set.yaml)). Nothing is published to crates.io or npm yet.
 
 ### 1. Add the sync hook to your refill path
 
@@ -55,7 +55,7 @@ await cache.set(key, serialize(row));
 
 ```bash
 # Force a stale-set race 20 times; exit code 1 if any run leaves a stale value
-cawit verify stale-set --config cawit.yaml --runs 20
+cawit verify stale-set.yaml --runs 20 --junit report.xml
 ```
 
 Each run:
