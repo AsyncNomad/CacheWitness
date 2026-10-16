@@ -1,0 +1,17 @@
+[package]
+name = "cawit"
+description = "CacheWitness: force cache races in a fixed order and prove the fix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "cawit"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+cawit-verify = { path = "../cawit-verify" }
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

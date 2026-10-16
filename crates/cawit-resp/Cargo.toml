@@ -1,0 +1,9 @@
+[package]
+name = "cawit-resp"
+description = "Minimal RESP2/RESP3 frames and a small async Redis client for CacheWitness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
