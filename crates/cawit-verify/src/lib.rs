@@ -20,7 +20,7 @@
 //!    JUnit rendering.
 //!
 //! The hook and the runner talk through Redis lists (the *hook protocol*,
-//! described in the [scenario reference](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/scenarios.md#hook-protocol-v2)),
+//! described in the [hook protocol reference](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/book/en/src/reference/hook-protocol.md)),
 //! so the application can be in any language and on any host that reaches
 //! the same Redis.
 //!

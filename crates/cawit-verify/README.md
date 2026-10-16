@@ -4,6 +4,6 @@ The verify engine of [CacheWitness](https://github.com/AsyncNomad/CacheWitness):
 
 Most users want the [`cawit`](https://crates.io/crates/cawit) command line instead. Use this crate to embed the runner or to register your own step kinds, checks, and patterns (`steps::Registry`, `checks::Registry`, `patterns::Registry`).
 
-Scenario format: [docs/scenarios.md](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/scenarios.md). Hook protocol: [docs/design/verify-design.md](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/design/verify-design.md) (Korean).
+Documentation: [scenario format](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/book/en/src/reference/scenario-format.md), [hook protocol](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/book/en/src/reference/hook-protocol.md), [extending the engine](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/book/en/src/architecture/extending.md).
 
 The API is not stable before 1.0. Licensed under Apache-2.0.

@@ -1,5 +1,5 @@
 //! The scenario file format. The user-facing reference is
-//! [docs/scenarios.md](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/scenarios.md).
+//! [scenario format reference](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/book/en/src/reference/scenario-format.md).
 //!
 //! Every struct rejects unknown fields, so a typo in a scenario fails to load
 //! instead of being ignored.

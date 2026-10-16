@@ -11,7 +11,7 @@ First release of the verify mode: force a cache race in the same order on every 
 ### Added
 
 - `cawit verify <scenario.yaml>`: runs a scenario N times; per-run output, summary, JSON (`--out`), JUnit (`--junit`), `--show-steps`; exit codes 0 / 1 / 2.
-- Scenario format: named apps and request templates, `state` with `cache_key` or `app_view`, hand-written `steps` or a built-in `pattern`. See `docs/scenarios.md`.
+- Scenario format: named apps and request templates, `state` with `cache_key` or `app_view`, hand-written `steps` or a built-in `pattern`. See the [scenario format reference](docs/book/en/src/reference/scenario-format.md).
 - Built-in patterns: `stale-set`, `failed-invalidation` (fault injection), `invalidate-before-commit`.
 - Checks: `cache_not_stale`, `cache_equals_db`, `cache_absent`, `app_equals_db`, `app_cached_equals_db`; strict or bounded (`within_ms`) verdicts.
 - Manipulation check: runs whose sync point was not reached, or whose hold timed out before release, are `NOT_REACHED` and never count as passes.

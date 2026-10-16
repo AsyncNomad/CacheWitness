@@ -16,7 +16,7 @@
 
    **CacheWitness** (CLI: `cawit`) is an open-source Rust testing tool for PostgreSQL + Redis applications. It **makes a cache race happen in exactly the same order every time, and proves in CI that a fix really prevents it.** In one line: **"Trigger the cache race the same way every time, and prove the fix actually stops it."**
 
-   Cache-aside with Redis in front of the database is the default for web backends, and its races are well known: a reader loads an old row, a writer commits and invalidates, and the reader writes the old row back. The trouble is that these races are timing accidents. They rarely show up in tests, they vanish when you add logging, and **a fix cannot be tested against an accident that may or may not happen.** We measured exactly this on a real application: under the same load, one run left stale values after 6.5% of write bursts and another after 0.17%.
+   Cache-aside with Redis in front of the database is the default for web backends, and its races are well known: a reader loads an old row, a writer commits and invalidates, and the reader writes the old row back. The trouble is that these races are timing accidents. They rarely show up in tests, they vanish when you add logging, and **a fix cannot be tested against an accident that may or may not happen.** We measured exactly this on a real application: under identical conditions (write bursts, with the refill slowed to 50 ms), one run left stale values after 6.5% of bursts and another after 0.17%.
 
    **CacheWitness solves this by controlling the order instead of hoping for it.** A small sync hook in your cache refill path pauses a reader right after its database read. The scenario runner then commits and invalidates from another request, releases the reader, and checks Redis against the database. The race happens on every run, so the test fails every time before the fix and passes every time after it. CacheWitness is built on a clear philosophy: **"Don't wait for the race. Cause it, and prove the fix."**
 
@@ -94,7 +94,7 @@ Each run:
 5. checks that readers get what the database committed,
 6. checks that the cache refills with the current value (a fix must not stop caching altogether).
 
-A run that never reached the hook, or whose hold timed out, is discarded, not counted as a pass. Patterns, steps, and verdicts: [`docs/scenarios.md`](docs/scenarios.md).
+A run that never reached the hook, or whose hold timed out, is discarded, not counted as a pass. Patterns, steps, and verdicts: [Scenario Format](docs/book/en/src/reference/scenario-format.md) and [Race Patterns](docs/book/en/src/guide/patterns.md).
 
 ### 4. Read the result
 
@@ -146,7 +146,7 @@ All experiments ran locally, with the application lab isolated from the network.
 
 - **Forced order on Twenty CRM (20 runs each):** unfixed 20/20 stale; version-compare SET 20/20 stale; lease 0/20 stale but no refill (in-process memoizer); lease + re-read 0/20 stale and 20/20 refilled.
 - **Forced order on Directus (20 runs each):** unfixed 20/20 stale; delayed double delete 20/20 stale when the reader is slower than the delay (but 10/10 fine with a fast reader, which is how it slips through ordinary tests); generation check 20/20 pass.
-- **Probability instead of order:** the same burst workload left stale values in 6.5% of bursts in one run and 0.17% in another. Delaying cache writes through a proxy inflated the rate up to 10-30x compared with a real slow refill.
+- **Probability instead of order:** with the refill slowed to 50 ms, the same burst workload left stale values in 6.5% of bursts in one run and 0.17% in another. Without the slowdown, no stale value outlived a burst (0 of about 1,100). Delaying cache writes through a proxy inflated the rate up to 10-30x compared with a real slow refill.
 - **Detection on a real test suite:** 1,527 of 1,528 changes to cached rows were invalidated (median 1.7ms). Stale state was confirmed reliably in our ground-truth runs (157/157), but deterministic invalidation bugs were rare.
 
 These findings are why CacheWitness focuses on forced reproduction and fix verification.

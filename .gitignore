@@ -5,3 +5,5 @@ lab/out/
 truth.json
 natural_oracle.json
 __pycache__/
+docs/book/*/book/
+docs/book/*/mermaid*.js

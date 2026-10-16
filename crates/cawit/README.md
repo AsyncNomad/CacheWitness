@@ -12,7 +12,8 @@ A scenario names a built-in pattern (`stale-set`, `failed-invalidation`, `invali
 
 Exit codes: `0` every run passed, `1` a run failed, `2` inconclusive (a run never reached its sync point, or errored).
 
-- Scenario format: [docs/scenarios.md](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/scenarios.md)
+- Getting started: [documentation](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/book/en/src/getting-started.md)
+- Scenario format: [reference](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/book/en/src/reference/scenario-format.md)
 - Project overview: [README](https://github.com/AsyncNomad/CacheWitness#readme)
 
 For test environments only. Licensed under Apache-2.0.

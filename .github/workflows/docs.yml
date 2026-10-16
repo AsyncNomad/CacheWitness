@@ -1,0 +1,51 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install mdBook and mdbook-mermaid
+        run: cargo install mdbook mdbook-mermaid --locked
+      - name: Build the books (en at /, ko at /ko/, zh at /zh/)
+        run: |
+          for lang in en ko zh; do
+            mdbook-mermaid install docs/book/$lang
+            mdbook build docs/book/$lang
+          done
+          mkdir -p public
+          cp -r docs/book/en/book/* public/
+          cp -r docs/book/ko/book public/ko
+          cp -r docs/book/zh/book public/zh
+      - name: Build the API docs (at /api/)
+        run: |
+          RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+          cp -r target/doc public/api
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

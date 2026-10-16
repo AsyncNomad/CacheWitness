@@ -13,7 +13,7 @@
 //! All built-in patterns end with `not_stale` and `refilled` expectations,
 //! using the `app_*` checks when `state.app_view` is set and the `cache_*`
 //! checks otherwise. Parameters are listed in the
-//! [scenario reference](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/scenarios.md#patterns).
+//! [scenario format reference](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/book/en/src/reference/scenario-format.md#patterns).
 //!
 //! # Adding a pattern
 //!
