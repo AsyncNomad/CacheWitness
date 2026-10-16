@@ -40,11 +40,14 @@ pub struct Scenario {
     /// Number of runs (default 1); `--runs` overrides it.
     #[serde(default = "one")]
     pub runs: u32,
-    /// Named application base URLs, e.g. `a: http://127.0.0.1:3000`.
+    /// Named application base URLs, e.g. `a: http://127.0.0.1:3000`
+    /// (`${env.X}` allowed).
     pub apps: BTreeMap<String, String>,
-    /// Redis used for the sync protocol and for reading cache state.
+    /// Redis used for the sync protocol and for reading cache state
+    /// (`${env.X}` allowed, e.g. for a password).
     pub redis: String,
-    /// PostgreSQL connection string, for checks that compare with the database.
+    /// PostgreSQL connection string, for checks that compare with the database
+    /// (`${env.X}` allowed).
     #[serde(default)]
     pub postgres: Option<String>,
     /// Named request templates, referenced by steps and patterns.
@@ -59,6 +62,41 @@ pub struct Scenario {
     /// A built-in pattern, `{ <name>: <params> }`, instead of `steps`.
     #[serde(default)]
     pub pattern: Option<serde_yaml::Value>,
+    /// TLS for `rediss://` and `https://` (a private CA, or no verification).
+    #[serde(default)]
+    pub tls: Option<TlsSpec>,
+    /// Directory of the scenario file, for relative paths (set by [`Scenario::load`]).
+    #[serde(skip)]
+    pub base_dir: Option<std::path::PathBuf>,
+}
+
+/// TLS options for Redis (`rediss://`) and application servers (`https://`).
+/// PostgreSQL follows `sslmode` in its connection string instead
+/// ([`crate::pg_tls`]).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsSpec {
+    /// Extra trusted CA certificates (PEM), relative to the scenario file.
+    #[serde(default)]
+    pub ca_file: Option<std::path::PathBuf>,
+    /// Do not verify certificates (self-signed test servers only).
+    #[serde(default)]
+    pub insecure: bool,
+}
+
+impl Scenario {
+    /// TLS options with `ca_file` resolved against the scenario's directory.
+    pub fn tls_options(&self) -> cawit_resp::tls::TlsOptions {
+        let spec = self.tls.clone().unwrap_or_default();
+        let ca_file = spec.ca_file.map(|p| match &self.base_dir {
+            Some(dir) if p.is_relative() => dir.join(p),
+            _ => p,
+        });
+        cawit_resp::tls::TlsOptions {
+            ca_file,
+            insecure: spec.insecure,
+        }
+    }
 }
 
 fn one() -> u32 {
@@ -140,7 +178,9 @@ impl Scenario {
     /// Read and parse a scenario file.
     pub fn load(path: &Path) -> Result<Scenario> {
         let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-        Scenario::parse(&text).with_context(|| format!("parsing {}", path.display()))
+        let mut sc = Scenario::parse(&text).with_context(|| format!("parsing {}", path.display()))?;
+        sc.base_dir = path.parent().map(|d| d.to_path_buf());
+        Ok(sc)
     }
 
     /// Parse a scenario from YAML. Exactly one of `steps` and `pattern` must

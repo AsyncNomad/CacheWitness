@@ -36,6 +36,15 @@ test('parser handles bulk, array, null, integer, error', () => {
   assert.strictEqual(hook._parse(Buffer.from('$3\r\nab'), 0), null);
 });
 
+test('URL parsing matches the runner, and errors never show the password', () => {
+  const p = hook._parseUrl;
+  assert.deepStrictEqual(p('rediss://app:p%40ss@cache:6380/2'), { tls: true, host: 'cache', port: 6380, db: 2, user: 'app', password: 'p@ss' });
+  assert.deepStrictEqual(p('redis://secret@h'), { tls: false, host: 'h', port: 6379, db: 0, user: null, password: 'secret' });
+  assert.deepStrictEqual(p('redis://:only@[::1]:7000'), { tls: false, host: '::1', port: 7000, db: 0, user: null, password: 'only' });
+  assert.throws(() => p('redis://u:hunter2@h/x'), (e) => !e.message.includes('hunter2') && e.message.includes('u:***@'));
+  assert.throws(() => p('http://h'));
+});
+
 test('unarmed sync point returns at once', async () => {
   const t0 = Date.now();
   await hook.syncPoint('test:unarmed', 'k');

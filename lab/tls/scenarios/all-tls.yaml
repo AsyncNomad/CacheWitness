@@ -1,0 +1,29 @@
+# TLS and authentication end to end: the app is served over HTTPS, the hook
+# protocol runs over rediss:// with a password, and PostgreSQL is reached with
+# sslmode=require. The check passes only if the PostgreSQL connection used TLS
+# (pg_stat_ssl.ssl = true) and the HTTPS app answered after its held call was
+# released over the TLS Redis connection. Passwords come from the environment
+# (LAB_REDIS_PASSWORD, LAB_PG_PASSWORD), as they should in a real CI job.
+name: tls-all
+runs: 3
+apps:
+  a: https://localhost:8443
+redis: rediss://:${env.LAB_REDIS_PASSWORD}@localhost:6392
+postgres: "host=127.0.0.1 port=5441 user=postgres password=${env.LAB_PG_PASSWORD} dbname=postgres sslmode=require"
+tls:
+  ca_file: ../../out/tls-lab/certs/ca.pem
+
+requests:
+  read: { method: GET, path: /item }
+
+state:
+  db_query: "select ssl::text from pg_stat_ssl where pid = pg_backend_pid()"
+  app_view: { app: a, request: read, field: /title }
+
+steps:
+  - arm: { point: "refill:after-read", key: item, as: refill }
+  - http: { app: a, request: read, async: held }
+  - reached: { sync: refill, timeout_ms: 5000 }
+  - release: { sync: refill }
+  - await: { task: held }
+  - expect: { name: tls_everywhere, check: app_equals_db }

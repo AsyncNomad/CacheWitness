@@ -55,6 +55,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tokio::task::JoinHandle;
 
+use cawit_resp::tls::TlsConfig;
+
 use crate::checks;
 use crate::http;
 use crate::scenario::Scenario;
@@ -105,6 +107,8 @@ pub struct RunCtx<'s> {
     pub vars: Vars,
     /// This run's Redis connection (protocol commands, cache reads).
     pub redis: cawit_resp::Client,
+    /// TLS configuration for `https://` apps (from the scenario's `tls`).
+    pub tls: TlsConfig,
     /// PostgreSQL connection, if the scenario names one.
     pub pg: Option<&'s tokio_postgres::Client>,
     /// Armed sync points by alias (`as`).
@@ -196,11 +200,15 @@ pub struct Prepared {
     headers: Vec<(String, String)>,
     body: Option<Vec<u8>>,
     error_field: Option<String>,
+    tls: TlsConfig,
 }
 
 /// Render the named request template for `app` with the run variables plus `extra`.
 pub fn prepare(ctx: &RunCtx<'_>, app: &str, request: &str, extra: &BTreeMap<String, String>) -> Result<Prepared> {
-    let base = ctx.scenario.apps.get(app).with_context(|| format!("unknown app `{app}`"))?.clone();
+    let base = render(
+        ctx.scenario.apps.get(app).with_context(|| format!("unknown app `{app}`"))?,
+        &ctx.vars,
+    )?;
     let tpl = ctx
         .scenario
         .requests
@@ -230,6 +238,7 @@ pub fn prepare(ctx: &RunCtx<'_>, app: &str, request: &str, extra: &BTreeMap<Stri
         headers,
         body,
         error_field: tpl.error_field.clone(),
+        tls: ctx.tls.clone(),
     })
 }
 
@@ -243,8 +252,9 @@ impl Prepared {
             headers,
             body,
             error_field,
+            tls,
         } = self;
-        let resp = http::request(&base, &method, &path, &headers, body).await?;
+        let resp = http::request(&base, &method, &path, &headers, body, Some(&tls)).await?;
         let text = || String::from_utf8_lossy(&resp.body).chars().take(300).collect::<String>();
         if resp.status >= 400 {
             bail!("HTTP {} from {base}{path}: {}", resp.status, text());

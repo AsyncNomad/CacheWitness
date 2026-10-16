@@ -28,6 +28,10 @@
 
 执行器不关心应用用什么语言编写。你需要一个对应语言的钩子；[协议](../reference/hook-protocol.md)只是几个 Redis 命令。Python 钩子已在计划中。
 
+### 它能连接使用 TLS 和密码的托管 Redis 或预发布环境吗？
+
+可以：支持带 `AUTH`（用户名和密码）的 `rediss://`、`https://` 应用 URL，以及遵循 `sslmode` 的 PostgreSQL TLS。私有 CA 放在 `tls.ca_file`（执行器）和 `NODE_EXTRA_CA_CERTS`（钩子）中；密码可以来自环境变量（`${env.X}`）。见[场景格式](../reference/scenario-format.md#tls-与认证)。
+
 ### 它支持 MySQL、Redis Cluster、Memcached 或 Valkey 吗？
 
 - **Valkey**：支持，它使用 Redis 协议。

@@ -28,6 +28,18 @@ docker run -d --name cawit-redis -p 6379:6379 redis:7.2
 CAWIT_SYNC_URL=redis://127.0.0.1:6379 npm test --prefix hooks/node
 ```
 
+Packaging check before a release (use a fresh target directory: cargo reuses build artifacts of an earlier package of the same version, which can hide a missing change):
+
+```bash
+cargo package --workspace --target-dir "$(mktemp -d)"
+```
+
+TLS and authentication end to end (Redis with a password and TLS, PostgreSQL TLS, an HTTPS app, a throwaway CA; needs Docker and the lab network):
+
+```bash
+lab/tls/run.sh
+```
+
 The documentation is an mdBook per language under `docs/book/<lang>`. With `mdbook` and `mdbook-mermaid` installed:
 
 ```bash

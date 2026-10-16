@@ -28,6 +28,10 @@
 
 실행기는 애플리케이션 언어를 신경 쓰지 않습니다. 그 언어의 훅이 필요하며, [프로토콜](../reference/hook-protocol.md)은 Redis 명령 몇 개입니다. Python 훅을 계획하고 있습니다.
 
+### TLS와 비밀번호를 쓰는 관리형 Redis나 스테이징 환경에도 붙나요?
+
+네. `rediss://`와 `AUTH`(사용자·비밀번호), `https://` 애플리케이션 URL, `sslmode`를 따르는 PostgreSQL TLS를 지원합니다. 사설 CA는 `tls.ca_file`(실행기)과 `NODE_EXTRA_CA_CERTS`(훅)로, 비밀번호는 환경 변수(`${env.X}`)로 넘길 수 있습니다. [시나리오 형식](../reference/scenario-format.md#tls와-인증)을 보십시오.
+
 ### MySQL, Redis Cluster, Memcached, Valkey에서도 되나요?
 
 - **Valkey**: 됩니다. Redis 프로토콜을 씁니다.

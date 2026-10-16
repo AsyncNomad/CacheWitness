@@ -57,6 +57,7 @@
 pub mod checks;
 pub mod http;
 pub mod patterns;
+pub mod pg_tls;
 pub mod runner;
 pub mod scenario;
 pub mod steps;

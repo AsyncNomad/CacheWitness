@@ -4,6 +4,17 @@ All notable changes to CacheWitness are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- TLS and authentication: `rediss://` and Redis `AUTH` (user and password) in the runner and the Node hook, `https://` application URLs, PostgreSQL TLS following `sslmode`, and a scenario `tls` section (`ca_file`, `insecure`). The hook reads `CAWIT_SYNC_TLS_INSECURE` and Node's `NODE_EXTRA_CA_CERTS`.
+- `${env.X}` in `redis`, `postgres`, and `apps`, to keep passwords out of scenario files.
+- `cawit_resp::RedisUrl` and `cawit_resp::redact`.
+
+### Fixed
+
+- A failed `AUTH` or `SELECT`, or a non-numeric database in a Redis URL, is now an error instead of being ignored.
+- Redis passwords are no longer printed in error messages (runner and hook).
+
 ## [0.1.0] - unreleased
 
 First release of the verify mode: force a cache race in the same order on every run, and prove a fix prevents it.

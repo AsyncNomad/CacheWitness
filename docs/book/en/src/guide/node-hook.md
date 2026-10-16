@@ -45,9 +45,12 @@ Closes the hook's shared Redis connection (for tests and graceful shutdown).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CAWIT_SYNC_URL` | unset | `redis://host[:port][/db]` that the runner also uses. Unset means the hook is off |
+| `CAWIT_SYNC_URL` | unset | `redis://[[user]:password@]host[:port][/db]`, or `rediss://` for TLS, that the runner also uses. Unset means the hook is off |
 | `CAWIT_SYNC_TIMEOUT_S` | `30` | how long a held call waits for release before going on (decimals allowed). The runner treats a hold that timed out as `NOT_REACHED` |
 | `CAWIT_ALLOW_PRODUCTION` | unset | with `NODE_ENV=production`, the hook stays off unless this is `1` |
+| `CAWIT_SYNC_TLS_INSECURE` | unset | `1`: do not verify a `rediss://` server's certificate (test servers only) |
+
+For `rediss://`, the hook trusts Node's CA list plus `NODE_EXTRA_CA_CERTS`. With a password in the URL it sends `AUTH` on every connection it opens; a failed `AUTH` makes the call throw with the reason (the password is never printed).
 
 ## Where to put the call
 

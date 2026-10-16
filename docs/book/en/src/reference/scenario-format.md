@@ -23,15 +23,34 @@ pattern: { ... }                  # either a pattern...
 |---|---|---|---|
 | `name` | string | yes | Output label and JUnit suite name |
 | `runs` | integer | no (1) | Number of runs |
-| `apps` | map name → URL | yes | Application servers. `http://host:port` only (no TLS) |
-| `redis` | string | yes | `redis://host[:port][/db]` for the hook protocol and `cache_key` reads; must be the Redis in the application's `CAWIT_SYNC_URL` |
-| `postgres` | string | for checks | libpq key=value connection string |
+| `apps` | map name → URL | yes | Application servers, `http://` or `https://` |
+| `redis` | string | yes | `redis://[[user]:password@]host[:port][/db]`, or `rediss://` for TLS, for the hook protocol and `cache_key` reads; must be the Redis in the application's `CAWIT_SYNC_URL` |
+| `postgres` | string | for checks | libpq key=value connection string; `sslmode` is honoured ([TLS](#tls-and-authentication)) |
+| `tls` | map | no | TLS options for `rediss://` and `https://` ([below](#tls-and-authentication)) |
 | `requests` | map name → [request](#requests) | yes in practice | Request templates |
 | `state` | [state](#state) | for checks | What checks compare |
 | `pattern` | one-key map | one of | A [pattern](../guide/patterns.md) and its parameters |
 | `steps` | list | one of | Hand-written [steps](#steps) |
 
 Exactly one of `pattern` and `steps` must be present.
+
+## TLS and authentication
+
+| Connection | How |
+|---|---|
+| Redis | `redis://user:password@host` (or `:password@`, or a lone `password@`) sends `AUTH`; `rediss://` uses TLS. User and password are percent-decoded |
+| Applications | `https://` URLs in `apps` |
+| PostgreSQL | `sslmode` in the connection string: `disable`, `prefer` (default: TLS if the server offers it), `require`. As in libpq for these modes, the server certificate is not verified |
+
+Certificates for Redis and applications are verified against the system trust store (the bundled Mozilla roots when it is empty). For private CAs or self-signed test servers:
+
+```yaml
+tls:
+  ca_file: certs/ca.pem    # extra trusted CA (PEM), relative to the scenario file
+  insecure: false          # true: do not verify certificates (test servers only)
+```
+
+Keep passwords out of scenario files: `redis`, `postgres`, and the URLs in `apps` accept `${env.X}`, e.g. `redis: rediss://:${env.REDIS_PASSWORD}@cache:6380`. Passwords in Redis URLs are shown as `***` in all output.
 
 ## Requests
 
@@ -56,7 +75,7 @@ A status of 400 or higher is an error. An error ends the run as `ERROR` unless t
 | `${env.NAME}` | environment variable of the `cawit` process; error if unset |
 | `${name}` | an entry of the step's `vars` (whose values may themselves use `${run}` and `${env.X}`) |
 
-An unknown variable is an error. The `arm` step's `key` is rendered the same way; `state` values are used literally.
+An unknown variable is an error. The `arm` step's `key` is rendered the same way. `redis`, `postgres`, and `apps` accept `${env.X}`; `state` values are used literally.
 
 ## State
 

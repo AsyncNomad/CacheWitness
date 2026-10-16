@@ -16,30 +16,83 @@
 // blocking connection made a second request in the same server wait for the
 // first one's release).
 const net = require('net');
+const tls = require('tls');
 
 const ENABLED = !!process.env.CAWIT_SYNC_URL &&
   (process.env.NODE_ENV !== 'production' || process.env.CAWIT_ALLOW_PRODUCTION === '1');
 const TIMEOUT_S = Number(process.env.CAWIT_SYNC_TIMEOUT_S || 30);
 let conn = null;
 
+// The URL with its password replaced by ***, for error messages.
+function redact(u) {
+  return String(u).replace(/^([a-z]+:\/\/)([^/@?#]*)@/i, (_, scheme, info) =>
+    `${scheme}${info.includes(':') ? `${info.split(':')[0]}:***` : '***'}@`);
+}
+
+// redis://[[user]:password@]host[:port][/db], or rediss:// for TLS. A lone
+// userinfo (redis://secret@host) is the password, as in redis-cli.
 function parseUrl(u) {
-  const m = /^redis:\/\/(?:[^@/]*@)?([^:/]+)(?::(\d+))?(?:\/(\d+))?/.exec(u);
-  if (!m) throw new Error(`cawit-hook: bad CAWIT_SYNC_URL ${u}`);
-  return { host: m[1], port: Number(m[2] || 6379), db: Number(m[3] || 0) };
+  const bad = (why) => new Error(`cawit-hook: bad CAWIT_SYNC_URL ${redact(u)}: ${why}`);
+  if (!/^rediss?:\/\//.test(u)) throw bad('expected redis:// or rediss://');
+  let url;
+  try {
+    url = new URL(u);
+  } catch {
+    throw bad('not a URL');
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  if (!host) throw bad('missing host');
+  const dbText = url.pathname.replace(/^\//, '');
+  if (dbText && !/^\d+$/.test(dbText)) throw bad('the database must be a number');
+  // Same rule as the runner: "user:password@" or ":password@", or a lone
+  // "password@" when the userinfo has no colon.
+  const userinfo = /^rediss?:\/\/([^/]*)@/.exec(u);
+  let user = null;
+  let password = null;
+  if (userinfo) {
+    if (userinfo[1].includes(':')) {
+      user = decodeURIComponent(url.username) || null;
+      password = decodeURIComponent(url.password);
+    } else {
+      password = decodeURIComponent(url.username);
+    }
+  }
+  return {
+    tls: url.protocol === 'rediss:',
+    host,
+    port: Number(url.port || 6379),
+    db: Number(dbText || 0),
+    user,
+    password,
+  };
 }
 
 // Minimal RESP2 client: requests are queued, replies resolve in order.
 class Conn {
   constructor(url) {
-    const { host, port, db } = parseUrl(url);
+    const { tls: secure, host, port, db, user, password } = parseUrl(url);
     this.queue = [];
     this.buf = Buffer.alloc(0);
-    this.sock = net.connect(port, host);
+    // TLS trusts Node's CAs plus NODE_EXTRA_CA_CERTS; CAWIT_SYNC_TLS_INSECURE=1
+    // skips verification (self-signed test servers only).
+    this.sock = secure
+      ? tls.connect({
+          host,
+          port,
+          servername: net.isIP(host) ? undefined : host,
+          rejectUnauthorized: process.env.CAWIT_SYNC_TLS_INSECURE !== '1',
+        })
+      : net.connect(port, host);
     this.sock.setNoDelay(true);
     this.sock.on('data', (d) => this.onData(d));
     this.sock.on('error', (e) => this.failAll(e));
     this.sock.on('close', () => this.failAll(new Error('cawit-hook: connection closed')));
-    if (db) this.cmd('SELECT', String(db));
+    // A failed AUTH or SELECT closes the connection, so every pending and
+    // later call fails with the reason instead of a confusing NOAUTH.
+    const setup = (what, args) =>
+      this.cmd(...args).catch((e) => this.sock.destroy(new Error(`cawit-hook: Redis ${what} failed: ${e.message}`)));
+    if (password !== null) setup('AUTH', user !== null ? ['AUTH', user, password] : ['AUTH', password]);
+    if (db) setup('SELECT', ['SELECT', String(db)]);
   }
   cmd(...args) {
     let out = `*${args.length}\r\n`;
@@ -153,4 +206,4 @@ function close() {
   }
 }
 
-module.exports = { syncPoint, close, enabled: ENABLED, CawitInjectedError, _parse: parse };
+module.exports = { syncPoint, close, enabled: ENABLED, CawitInjectedError, _parse: parse, _parseUrl: parseUrl };

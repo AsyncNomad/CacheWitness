@@ -23,15 +23,34 @@ pattern: { ... }                  # 패턴이나...
 |---|---|---|---|
 | `name` | 문자열 | 예 | 출력 이름, JUnit 스위트 이름 |
 | `runs` | 정수 | 아니오 (1) | 회차 수 |
-| `apps` | 이름 → URL | 예 | 애플리케이션 서버. `http://host:port`만 (TLS 없음) |
-| `redis` | 문자열 | 예 | 훅 프로토콜과 `cache_key` 읽기용 `redis://host[:port][/db]`. 애플리케이션의 `CAWIT_SYNC_URL`과 같은 Redis여야 함 |
-| `postgres` | 문자열 | 판정에 | libpq key=value 연결 문자열 |
+| `apps` | 이름 → URL | 예 | 애플리케이션 서버. `http://` 또는 `https://` |
+| `redis` | 문자열 | 예 | 훅 프로토콜과 `cache_key` 읽기용 `redis://[[user]:password@]host[:port][/db]`, TLS는 `rediss://`. 애플리케이션의 `CAWIT_SYNC_URL`과 같은 Redis여야 함 |
+| `postgres` | 문자열 | 판정에 | libpq key=value 연결 문자열. `sslmode`를 따름([TLS](#tls와-인증)) |
+| `tls` | 맵 | 아니오 | `rediss://`, `https://`용 TLS 옵션([아래](#tls와-인증)) |
 | `requests` | 이름 → [요청](#요청) | 사실상 예 | 요청 템플릿 |
 | `state` | [상태](#상태) | 판정에 | 판정이 비교하는 것 |
 | `pattern` | 키 하나짜리 맵 | 둘 중 하나 | [패턴](../guide/patterns.md)과 매개변수 |
 | `steps` | 리스트 | 둘 중 하나 | 직접 쓴 [단계](#단계) |
 
 `pattern`과 `steps` 중 정확히 하나가 있어야 합니다.
+
+## TLS와 인증
+
+| 연결 | 방법 |
+|---|---|
+| Redis | `redis://user:password@host`(또는 `:password@`, 또는 `password@`만)이면 `AUTH`를 보냄. `rediss://`는 TLS. 사용자와 비밀번호는 퍼센트 디코딩함 |
+| 애플리케이션 | `apps`에 `https://` URL |
+| PostgreSQL | 연결 문자열의 `sslmode`: `disable`, `prefer`(기본: 서버가 지원하면 TLS), `require`. 이 모드들에서 libpq와 같이 서버 인증서는 검증하지 않음 |
+
+Redis와 애플리케이션의 인증서는 시스템 신뢰 저장소로 검증합니다(비어 있으면 내장된 Mozilla 루트). 사설 CA나 자체 서명 시험 서버에는 다음을 씁니다.
+
+```yaml
+tls:
+  ca_file: certs/ca.pem    # 추가로 신뢰할 CA (PEM), 시나리오 파일 기준 상대 경로
+  insecure: false          # true: 인증서를 검증하지 않음 (시험 서버 전용)
+```
+
+비밀번호는 시나리오 파일에 적지 마십시오. `redis`, `postgres`, `apps`의 URL에 `${env.X}`를 쓸 수 있습니다. 예: `redis: rediss://:${env.REDIS_PASSWORD}@cache:6380`. Redis URL의 비밀번호는 모든 출력에서 `***`로 표시됩니다.
 
 ## 요청
 
@@ -56,7 +75,7 @@ pattern: { ... }                  # 패턴이나...
 | `${env.NAME}` | `cawit` 프로세스의 환경 변수. 없으면 오류 |
 | `${name}` | 단계의 `vars` 항목 (그 값에도 `${run}`, `${env.X}`를 쓸 수 있음) |
 
-모르는 변수는 오류입니다. `arm` 단계의 `key`도 같은 방식으로 처리되고, `state`의 값은 그대로 씁니다.
+모르는 변수는 오류입니다. `arm` 단계의 `key`도 같은 방식으로 처리됩니다. `redis`, `postgres`, `apps`에는 `${env.X}`를 쓸 수 있고, `state`의 값은 그대로 씁니다.
 
 ## 상태
 

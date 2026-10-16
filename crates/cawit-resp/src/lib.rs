@@ -4,10 +4,11 @@
 //!   first complete frame and how many bytes it used, or `None` when more
 //!   bytes are needed.
 //! - [`encode`] writes a command as a RESP array of bulk strings.
-//! - [`Client`] is a small async client that sends one command at a time.
+//! - [`Client`] is a small async client that sends one command at a time,
+//!   with `AUTH`, database selection, and TLS (`rediss://`, see [`tls`]).
 //!
-//! It is deliberately small: no pooling, no pipelining, no pub/sub, no TLS,
-//! no cluster support. It is what the CacheWitness runner needs for the hook
+//! It is deliberately small: no pooling, no pipelining, no pub/sub, no
+//! cluster support. It is what the CacheWitness runner needs for the hook
 //! protocol. For a general Redis client use `redis` or `fred`.
 //!
 //! # Example
@@ -32,9 +33,11 @@
 
 #![warn(missing_docs)]
 
+pub mod tls;
+
 use std::io;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 /// A reply from Redis.
@@ -183,46 +186,195 @@ pub fn encode<A: AsRef<[u8]>>(args: &[A]) -> Vec<u8> {
     out
 }
 
+/// A parsed Redis URL: `redis://[[user]:password@]host[:port][/db]`, or
+/// `rediss://` for TLS. User and password are percent-decoded.
+///
+/// ```
+/// use cawit_resp::RedisUrl;
+///
+/// let u = RedisUrl::parse("rediss://app:p%40ss@cache.internal:6380/2").unwrap();
+/// assert!(u.tls);
+/// assert_eq!((u.host.as_str(), u.port, u.db), ("cache.internal", 6380, 2));
+/// assert_eq!((u.user.as_deref(), u.password.as_deref()), (Some("app"), Some("p@ss")));
+///
+/// let u = RedisUrl::parse("redis://:secret@127.0.0.1").unwrap();
+/// assert_eq!((u.user, u.password.as_deref(), u.port), (None, Some("secret"), 6379));
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedisUrl {
+    /// `rediss://`: connect with TLS.
+    pub tls: bool,
+    /// Host name or IP address (IPv6 without brackets).
+    pub host: String,
+    /// Port, 6379 by default.
+    pub port: u16,
+    /// ACL user name, if any.
+    pub user: Option<String>,
+    /// Password, if any.
+    pub password: Option<String>,
+    /// Database number, 0 by default.
+    pub db: u32,
+}
+
+fn percent_decode(s: &str) -> io::Result<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            let hex = s
+                .get(i + 1..i + 3)
+                .ok_or_else(|| io::Error::other(format!("bad percent escape in {s:?}")))?;
+            out.push(u8::from_str_radix(hex, 16).map_err(|_| io::Error::other(format!("bad percent escape in {s:?}")))?);
+            i += 3;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|_| io::Error::other(format!("percent escapes in {s:?} are not UTF-8")))
+}
+
+/// The URL with its password replaced by `***`, for logs and error messages.
+///
+/// ```
+/// assert_eq!(cawit_resp::redact("redis://app:hunter2@h:6379/1"), "redis://app:***@h:6379/1");
+/// assert_eq!(cawit_resp::redact("rediss://secret@h"), "rediss://***@h");
+/// assert_eq!(cawit_resp::redact("redis://h"), "redis://h");
+/// ```
+pub fn redact(url: &str) -> String {
+    let Some(scheme_end) = url.find("://").map(|i| i + 3) else {
+        return url.to_string();
+    };
+    let rest = &url[scheme_end..];
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let Some(at) = rest[..authority_end].rfind('@') else {
+        return url.to_string();
+    };
+    let userinfo = &rest[..at];
+    let masked = match userinfo.split_once(':') {
+        Some((user, _)) => format!("{user}:***"),
+        None => "***".to_string(),
+    };
+    format!("{}{masked}{}", &url[..scheme_end], &rest[at..])
+}
+
+impl RedisUrl {
+    /// Parse a `redis://` or `rediss://` URL.
+    pub fn parse(url: &str) -> io::Result<RedisUrl> {
+        let bad = |why: &str| io::Error::other(format!("bad Redis URL {:?}: {why}", redact(url)));
+        let (tls, rest) = if let Some(r) = url.strip_prefix("rediss://") {
+            (true, r)
+        } else if let Some(r) = url.strip_prefix("redis://") {
+            (false, r)
+        } else {
+            return Err(bad("expected redis:// or rediss://"));
+        };
+        let rest = rest.split(['?', '#']).next().unwrap_or("");
+        let (userinfo, rest) = match rest.rsplit_once('@') {
+            Some((u, r)) => (Some(u), r),
+            None => (None, rest),
+        };
+        let (hostport, db) = match rest.split_once('/') {
+            Some((hp, "")) => (hp, 0),
+            Some((hp, db)) => (hp, db.parse::<u32>().map_err(|_| bad("the database must be a number"))?),
+            None => (rest, 0),
+        };
+        let (host, port) = if let Some(v6) = hostport.strip_prefix('[') {
+            let (h, after) = v6.split_once(']').ok_or_else(|| bad("unclosed [ in host"))?;
+            match after.strip_prefix(':') {
+                Some(p) => (h, p.parse::<u16>().map_err(|_| bad("bad port"))?),
+                None => (h, 6379),
+            }
+        } else {
+            match hostport.rsplit_once(':') {
+                Some((h, p)) => (h, p.parse::<u16>().map_err(|_| bad("bad port"))?),
+                None => (hostport, 6379),
+            }
+        };
+        if host.is_empty() {
+            return Err(bad("missing host"));
+        }
+        let (user, password) = match userinfo {
+            None => (None, None),
+            Some(u) => match u.split_once(':') {
+                Some((user, pass)) => {
+                    let user = if user.is_empty() { None } else { Some(percent_decode(user)?) };
+                    (user, Some(percent_decode(pass)?))
+                }
+                // `redis://secret@host`: a lone userinfo is the password, as in redis-cli.
+                None => (None, Some(percent_decode(u)?)),
+            },
+        };
+        Ok(RedisUrl {
+            tls,
+            host: host.to_string(),
+            port,
+            user,
+            password,
+            db,
+        })
+    }
+}
+
+trait Stream: AsyncRead + AsyncWrite + Unpin + Send + Sync {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send + Sync> Stream for T {}
+
 /// A small async Redis client: one connection, one command in flight at a time.
 ///
 /// ```no_run
 /// # async fn demo() -> std::io::Result<()> {
 /// use cawit_resp::{Client, Frame};
 ///
-/// let mut redis = Client::connect("redis://127.0.0.1:6379/0").await?;
+/// let mut redis = Client::connect("redis://:secret@127.0.0.1:6379/0").await?;
 /// redis.cmd(&["SET", "k", "v"]).await?;
 /// assert_eq!(redis.cmd(&["GET", "k"]).await?, Frame::Bulk(Some(b"v".to_vec())));
 /// # Ok(())
 /// # }
 /// ```
 pub struct Client {
-    stream: TcpStream,
+    stream: Box<dyn Stream>,
     buf: Vec<u8>,
 }
 
 impl Client {
-    /// Connect to `redis://host[:port][/db]` (port 6379 by default) and select
-    /// `db` if it is not 0. A `user:password@` part is accepted but ignored:
-    /// the client does not authenticate.
+    /// Connect to a [`RedisUrl`]: TLS for `rediss://` (verified against the
+    /// system trust store), `AUTH` when the URL has a password, `SELECT` when
+    /// it names a database other than 0. A failed `AUTH` or `SELECT` is an
+    /// error.
     pub async fn connect(url: &str) -> io::Result<Client> {
-        let rest = url
-            .strip_prefix("redis://")
-            .ok_or_else(|| io::Error::other(format!("not a redis:// url: {url}")))?;
-        let rest = rest.rsplit('@').next().unwrap_or(rest);
-        let (hostport, db) = match rest.split_once('/') {
-            Some((hp, db)) => (hp, db.parse::<u32>().unwrap_or(0)),
-            None => (rest, 0),
-        };
-        let addr = if hostport.contains(':') {
-            hostport.to_string()
+        Client::connect_with(url, None).await
+    }
+
+    /// Like [`Client::connect`], with the TLS configuration to use for
+    /// `rediss://` (for a private CA, or no verification).
+    pub async fn connect_with(url: &str, tls: Option<&tls::TlsConfig>) -> io::Result<Client> {
+        let u = RedisUrl::parse(url)?;
+        let tcp = TcpStream::connect((u.host.as_str(), u.port)).await?;
+        tcp.set_nodelay(true)?;
+        let stream: Box<dyn Stream> = if u.tls {
+            let config = match tls {
+                Some(c) => c.clone(),
+                None => tls::TlsConfig::default_roots()?,
+            };
+            Box::new(config.connect(&u.host, tcp).await?)
         } else {
-            format!("{hostport}:6379")
+            Box::new(tcp)
         };
-        let stream = TcpStream::connect(addr).await?;
-        stream.set_nodelay(true)?;
         let mut client = Client { stream, buf: Vec::new() };
-        if db != 0 {
-            client.cmd(&["SELECT", &db.to_string()]).await?;
+        if let Some(password) = &u.password {
+            let reply = match &u.user {
+                Some(user) => client.cmd(&["AUTH", user, password]).await?,
+                None => client.cmd(&["AUTH", password]).await?,
+            };
+            if let Frame::Error(e) = reply {
+                return Err(io::Error::new(io::ErrorKind::PermissionDenied, format!("Redis AUTH failed: {e}")));
+            }
+        }
+        if u.db != 0 {
+            if let Frame::Error(e) = client.cmd(&["SELECT", &u.db.to_string()]).await? {
+                return Err(io::Error::other(format!("Redis SELECT {} failed: {e}", u.db)));
+            }
         }
         Ok(client)
     }
@@ -231,6 +383,7 @@ impl Client {
     /// `Frame::Error`, not as `Err`.
     pub async fn cmd<A: AsRef<[u8]>>(&mut self, args: &[A]) -> io::Result<Frame> {
         self.stream.write_all(&encode(args)).await?;
+        self.stream.flush().await?;
         let mut chunk = [0u8; 8192];
         loop {
             match parse(&self.buf).map_err(|e| io::Error::other(e.0))? {
@@ -253,6 +406,36 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redis_urls() {
+        let u = RedisUrl::parse("redis://127.0.0.1").unwrap();
+        assert_eq!(
+            (u.tls, u.host.as_str(), u.port, u.db, u.user, u.password),
+            (false, "127.0.0.1", 6379, 0, None, None)
+        );
+        let u = RedisUrl::parse("redis://default:pw@h:7000/3?ignored=1").unwrap();
+        assert_eq!(
+            (u.user.as_deref(), u.password.as_deref(), u.port, u.db),
+            (Some("default"), Some("pw"), 7000, 3)
+        );
+        let u = RedisUrl::parse("redis://secret@h").unwrap();
+        assert_eq!((u.user, u.password.as_deref()), (None, Some("secret")));
+        let u = RedisUrl::parse("rediss://[::1]:6380/").unwrap();
+        assert_eq!((u.tls, u.host.as_str(), u.port, u.db), (true, "::1", 6380, 0));
+        let u = RedisUrl::parse("redis://u:a%3Ab%40c@h").unwrap();
+        assert_eq!(u.password.as_deref(), Some("a:b@c"));
+        for bad in [
+            "http://h",
+            "redis://",
+            "redis://h:port",
+            "redis://h/x",
+            "redis://u:%zz@h",
+            "redis://[::1",
+        ] {
+            assert!(RedisUrl::parse(bad).is_err(), "{bad} should fail");
+        }
+    }
 
     #[test]
     fn parses_scalars_and_aggregates() {

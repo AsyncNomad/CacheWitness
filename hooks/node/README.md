@@ -14,7 +14,7 @@ await cache.set(key, serialize(row));
 - **Hold.** When a scenario run by `cawit verify` arms the point (optionally for one key), the first call to reach it signals the runner and waits until released. Each held call waits on its own Redis connection, so other sync points in the process are not delayed.
 - **Fail.** Armed with action `fail`, the call throws `CawitInjectedError` once. Place it right before an operation, such as a cache invalidation, to test what happens when that operation fails.
 
-Environment: `CAWIT_SYNC_URL` (`redis://host:port[/db]`, a Redis the test runner also uses), `CAWIT_SYNC_TIMEOUT_S` (how long a held call waits before going on, default 30), `CAWIT_ALLOW_PRODUCTION`.
+Environment: `CAWIT_SYNC_URL` (`redis://[[user]:password@]host[:port][/db]`, or `rediss://` for TLS; a Redis the test runner also uses), `CAWIT_SYNC_TIMEOUT_S` (how long a held call waits before going on, default 30), `CAWIT_ALLOW_PRODUCTION`, `CAWIT_SYNC_TLS_INSECURE` (`1` skips certificate verification for test servers). Private CAs: Node's `NODE_EXTRA_CA_CERTS`. Passwords are never printed in errors.
 
 **Bundlers:** if your build bundles dependencies, mark `cawit-hook` as external, or rebuild after upgrading it. A copy of an older hook baked into the build speaks an older protocol and every run reports `NOT_REACHED`.
 

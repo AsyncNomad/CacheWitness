@@ -36,6 +36,7 @@ fn shipped_scenarios_load() {
             "directus-invalidate-before-commit",
             "directus-stale-set",
             "directus-stale-set-one-instance",
+            "tls-all",
             "twenty-stale-set"
         ]
     );

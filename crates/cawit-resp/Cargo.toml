@@ -12,4 +12,8 @@ categories.workspace = true
 readme = "README.md"
 
 [dependencies]
+rustls.workspace = true
+rustls-native-certs.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
+webpki-roots.workspace = true

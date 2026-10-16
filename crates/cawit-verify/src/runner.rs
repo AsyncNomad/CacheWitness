@@ -170,11 +170,17 @@ pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&Ru
         .map(|(i, v)| opts.steps.build(v).with_context(|| format!("step {}", i + 1)))
         .collect::<Result<_>>()?;
 
-    let pg = match &scenario.postgres {
+    let tls = cawit_resp::tls::TlsConfig::new(&scenario.tls_options()).context("setting up TLS")?;
+    // `${env.X}` in connection strings keeps passwords out of scenario files.
+    let redis_url = crate::template::render(&scenario.redis, &Vars::new()).context("in `redis`")?;
+    let postgres = match &scenario.postgres {
+        Some(conn) => Some(crate::template::render(conn, &Vars::new()).context("in `postgres`")?),
+        None => None,
+    };
+    let pg = match &postgres {
         Some(conn) => {
-            let (client, connection) = tokio_postgres::connect(conn, tokio_postgres::NoTls)
-                .await
-                .context("connecting to postgres")?;
+            let tls = crate::pg_tls::MakeRustls::new().context("setting up TLS for postgres")?;
+            let (client, connection) = tokio_postgres::connect(conn, tls).await.context("connecting to postgres")?;
             tokio::spawn(async move {
                 let _ = connection.await;
             });
@@ -187,9 +193,9 @@ pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&Ru
     let total = opts.runs.unwrap_or(scenario.runs);
     let mut results = Vec::new();
     for i in 1..=total {
-        let redis = cawit_resp::Client::connect(&scenario.redis)
+        let redis = cawit_resp::Client::connect_with(&redis_url, Some(&tls))
             .await
-            .with_context(|| format!("connecting to {}", scenario.redis))?;
+            .with_context(|| format!("connecting to {}", cawit_resp::redact(&redis_url)))?;
         let mut vars = Vars::new();
         vars.insert("run".into(), format!("{run_id}-{i}"));
         vars.insert("run_index".into(), i.to_string());
@@ -198,6 +204,7 @@ pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&Ru
             checks: &opts.checks,
             vars,
             redis,
+            tls: tls.clone(),
             pg: pg.as_ref(),
             syncs: BTreeMap::new(),
             tasks: BTreeMap::new(),

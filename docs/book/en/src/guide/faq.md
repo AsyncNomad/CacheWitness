@@ -28,6 +28,10 @@ No. A held call waits on its own Redis connection, so the competing request can 
 
 The runner does not care what the application is written in. You need a hook for your language; the [protocol](../reference/hook-protocol.md) is a few Redis commands. A Python hook is planned.
 
+### Can it reach a managed Redis or a staging environment with TLS and passwords?
+
+Yes: `rediss://` with `AUTH` (user and password), `https://` application URLs, and PostgreSQL with `sslmode`. Private CAs go in `tls.ca_file` (runner) and `NODE_EXTRA_CA_CERTS` (hook); passwords can come from the environment (`${env.X}`). See [Scenario Format](../reference/scenario-format.md#tls-and-authentication).
+
 ### Does it work with MySQL, Redis Cluster, Memcached, or Valkey?
 
 - **Valkey**: yes, it speaks the Redis protocol.

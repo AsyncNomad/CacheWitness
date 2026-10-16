@@ -23,15 +23,34 @@ pattern: { ... }                  # 要么是模式……
 |---|---|---|---|
 | `name` | 字符串 | 是 | 输出标签和 JUnit 套件名 |
 | `runs` | 整数 | 否（1） | 轮数 |
-| `apps` | 名称 → URL | 是 | 应用服务器。仅 `http://host:port`（无 TLS） |
-| `redis` | 字符串 | 是 | 用于钩子协议和 `cache_key` 读取的 `redis://host[:port][/db]`；必须是应用 `CAWIT_SYNC_URL` 指向的 Redis |
-| `postgres` | 字符串 | 检查需要 | libpq key=value 连接字符串 |
+| `apps` | 名称 → URL | 是 | 应用服务器，`http://` 或 `https://` |
+| `redis` | 字符串 | 是 | 用于钩子协议和 `cache_key` 读取的 `redis://[[user]:password@]host[:port][/db]`，TLS 用 `rediss://`；必须是应用 `CAWIT_SYNC_URL` 指向的 Redis |
+| `postgres` | 字符串 | 检查需要 | libpq key=value 连接字符串；遵循 `sslmode`（[TLS](#tls-与认证)） |
+| `tls` | 映射 | 否 | 用于 `rediss://` 和 `https://` 的 TLS 选项（[见下](#tls-与认证)） |
 | `requests` | 名称 → [请求](#请求) | 实际上必填 | 请求模板 |
 | `state` | [状态](#状态) | 检查需要 | 检查所比较的内容 |
 | `pattern` | 单键映射 | 二选一 | 一个[模式](../guide/patterns.md)及其参数 |
 | `steps` | 列表 | 二选一 | 手写的[步骤](#步骤) |
 
 `pattern` 和 `steps` 必须恰好出现一个。
+
+## TLS 与认证
+
+| 连接 | 方式 |
+|---|---|
+| Redis | `redis://user:password@host`（或 `:password@`，或只有 `password@`）会发送 `AUTH`；`rediss://` 使用 TLS。用户名和密码会做百分号解码 |
+| 应用 | 在 `apps` 中使用 `https://` URL |
+| PostgreSQL | 连接字符串中的 `sslmode`：`disable`、`prefer`（默认：服务器支持时使用 TLS）、`require`。与 libpq 在这些模式下一致，不验证服务器证书 |
+
+Redis 和应用的证书会用系统信任库验证（为空时使用内置的 Mozilla 根证书）。对于私有 CA 或自签名的测试服务器：
+
+```yaml
+tls:
+  ca_file: certs/ca.pem    # 额外信任的 CA（PEM），相对于场景文件
+  insecure: false          # true：不验证证书（仅限测试服务器）
+```
+
+不要把密码写进场景文件：`redis`、`postgres` 和 `apps` 中的 URL 都支持 `${env.X}`，例如 `redis: rediss://:${env.REDIS_PASSWORD}@cache:6380`。所有输出中 Redis URL 的密码都显示为 `***`。
 
 ## 请求
 
@@ -56,7 +75,7 @@ pattern: { ... }                  # 要么是模式……
 | `${env.NAME}` | `cawit` 进程的环境变量；未设置时报错 |
 | `${name}` | 步骤 `vars` 中的一项（其值本身也可以使用 `${run}` 和 `${env.X}`） |
 
-未知变量会报错。`arm` 步骤的 `key` 也以同样方式渲染；`state` 中的值按原样使用。
+未知变量会报错。`arm` 步骤的 `key` 也以同样方式渲染。`redis`、`postgres` 和 `apps` 可以使用 `${env.X}`；`state` 中的值按原样使用。
 
 ## 状态
 

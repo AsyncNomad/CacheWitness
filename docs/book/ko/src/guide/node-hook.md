@@ -45,9 +45,12 @@ import * as cawit from "cawit-hook";          // ESM / TypeScript
 
 | 변수 | 기본값 | 의미 |
 |---|---|---|
-| `CAWIT_SYNC_URL` | 없음 | 실행기도 쓰는 `redis://host[:port][/db]`. 없으면 훅이 꺼짐 |
+| `CAWIT_SYNC_URL` | 없음 | 실행기도 쓰는 `redis://[[user]:password@]host[:port][/db]`, TLS는 `rediss://`. 없으면 훅이 꺼짐 |
 | `CAWIT_SYNC_TIMEOUT_S` | `30` | 붙잡힌 호출이 해제를 기다리는 시간(소수 가능). 실행기는 시간 초과된 붙잡기를 `NOT_REACHED`로 봄 |
 | `CAWIT_ALLOW_PRODUCTION` | 없음 | `NODE_ENV=production`이면 이 값이 `1`이 아닌 한 훅이 꺼진 채로 있음 |
+| `CAWIT_SYNC_TLS_INSECURE` | 없음 | `1`: `rediss://` 서버의 인증서를 검증하지 않음 (시험 서버 전용) |
+
+`rediss://`에서 훅은 Node의 CA 목록과 `NODE_EXTRA_CA_CERTS`를 신뢰합니다. URL에 비밀번호가 있으면 여는 연결마다 `AUTH`를 보내고, `AUTH`가 실패하면 호출이 이유와 함께 예외를 던집니다(비밀번호는 출력하지 않음).
 
 ## 호출을 어디에 넣을까
 

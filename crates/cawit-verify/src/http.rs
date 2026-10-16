@@ -1,9 +1,10 @@
 //! Minimal HTTP/1.1 client for scenario requests: one request per
-//! connection (`Connection: close`), Content-Length or chunked responses.
-//! Plain HTTP only; scenarios run against local test servers.
+//! connection (`Connection: close`), Content-Length or chunked responses,
+//! over plain TCP or TLS (`https://`).
 
 use anyhow::{Context, Result, bail};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use cawit_resp::tls::TlsConfig;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 /// An HTTP response.
@@ -26,17 +27,52 @@ impl Response {
     }
 }
 
-/// Send one request to `base` (`http://host:port`) and read the whole
-/// response. `Host`, `Connection: close`, and `Content-Length` are added.
-/// Status codes are not interpreted here.
-pub async fn request(base: &str, method: &str, path: &str, headers: &[(String, String)], body: Option<Vec<u8>>) -> Result<Response> {
-    let hostport = base
-        .strip_prefix("http://")
-        .with_context(|| format!("only http:// is supported: {base}"))?
-        .trim_end_matches('/');
-    let mut stream = TcpStream::connect(hostport)
-        .await
-        .with_context(|| format!("connecting to {hostport}"))?;
+trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
+
+/// Send one request to `base` (`http://host[:port]` or `https://host[:port]`)
+/// and read the whole response. `Host`, `Connection: close`, and
+/// `Content-Length` are added. Status codes are not interpreted here. `tls`
+/// is used for `https://`; without it, certificates are verified against the
+/// system trust store.
+pub async fn request(
+    base: &str,
+    method: &str,
+    path: &str,
+    headers: &[(String, String)],
+    body: Option<Vec<u8>>,
+    tls: Option<&TlsConfig>,
+) -> Result<Response> {
+    let (secure, hostport) = if let Some(rest) = base.strip_prefix("https://") {
+        (true, rest)
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        (false, rest)
+    } else {
+        bail!("app URL must start with http:// or https://: {base}");
+    };
+    let hostport = hostport.trim_end_matches('/');
+    let (host, addr) = match hostport.rsplit_once(':') {
+        Some((h, _)) if !hostport.ends_with(']') => (h.trim_matches(['[', ']']).to_string(), hostport.to_string()),
+        _ => (
+            hostport.trim_matches(['[', ']']).to_string(),
+            format!("{hostport}:{}", if secure { 443 } else { 80 }),
+        ),
+    };
+    let tcp = TcpStream::connect(&addr).await.with_context(|| format!("connecting to {addr}"))?;
+    let mut stream: Box<dyn Stream> = if secure {
+        let config = match tls {
+            Some(c) => c.clone(),
+            None => TlsConfig::default_roots()?,
+        };
+        Box::new(
+            config
+                .connect(&host, tcp)
+                .await
+                .with_context(|| format!("TLS handshake with {base}"))?,
+        )
+    } else {
+        Box::new(tcp)
+    };
     let body = body.unwrap_or_default();
     let mut req = format!(
         "{method} {path} HTTP/1.1\r\nHost: {hostport}\r\nConnection: close\r\nContent-Length: {}\r\n",
@@ -48,8 +84,15 @@ pub async fn request(base: &str, method: &str, path: &str, headers: &[(String, S
     req.push_str("\r\n");
     stream.write_all(req.as_bytes()).await?;
     stream.write_all(&body).await?;
+    stream.flush().await?;
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).await?;
+    match stream.read_to_end(&mut raw).await {
+        Ok(_) => {}
+        // Many servers close a TLS connection without close_notify after
+        // `Connection: close`; the response is complete by then.
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof && !raw.is_empty() => {}
+        Err(e) => return Err(e.into()),
+    }
     parse_response(&raw)
 }
 

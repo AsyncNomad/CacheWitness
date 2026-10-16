@@ -45,9 +45,12 @@ import * as cawit from "cawit-hook";          // ESM / TypeScript
 
 | 变量 | 默认值 | 含义 |
 |---|---|---|
-| `CAWIT_SYNC_URL` | 未设置 | 执行器也使用的 `redis://host[:port][/db]`。未设置表示钩子关闭 |
+| `CAWIT_SYNC_URL` | 未设置 | 执行器也使用的 `redis://[[user]:password@]host[:port][/db]`，TLS 用 `rediss://`。未设置表示钩子关闭 |
 | `CAWIT_SYNC_TIMEOUT_S` | `30` | 被暂停的调用等待放行的时长（可用小数）。执行器把超时的暂停视为 `NOT_REACHED` |
 | `CAWIT_ALLOW_PRODUCTION` | 未设置 | 在 `NODE_ENV=production` 下，除非此值为 `1`，否则钩子保持关闭 |
+| `CAWIT_SYNC_TLS_INSECURE` | 未设置 | `1`：不验证 `rediss://` 服务器的证书（仅限测试服务器） |
+
+使用 `rediss://` 时，钩子信任 Node 的 CA 列表以及 `NODE_EXTRA_CA_CERTS`。URL 中带密码时，钩子在它打开的每个连接上发送 `AUTH`；`AUTH` 失败会让调用带着原因抛出异常（绝不打印密码）。
 
 ## 调用放在哪里
 

@@ -16,6 +16,6 @@ CacheWitness is a testing tool. The sync hook and the scenario runner are meant 
 
 - The hook does nothing unless `CAWIT_SYNC_URL` is set, and stays off under `NODE_ENV=production` unless `CAWIT_ALLOW_PRODUCTION=1`. Anyone who can write to the Redis named by `CAWIT_SYNC_URL` can pause or fail requests that reach a sync point; treat that Redis as test infrastructure.
 - The runner sends the requests in your scenario to the servers in your scenario and connects to the PostgreSQL and Redis you name. Scenario files are trusted input.
-- The runner speaks plain HTTP and unauthenticated Redis (no TLS).
+- The runner supports TLS (`https://`, `rediss://`, PostgreSQL `sslmode`) and Redis `AUTH`. PostgreSQL certificates are not verified (libpq `sslmode=require` semantics), and `tls.insecure` turns off verification for Redis and applications; use both only against test servers. Redis passwords are redacted from output.
 
 Reports about the hook turning on, or doing I/O, when it should be off are in scope and especially welcome.
