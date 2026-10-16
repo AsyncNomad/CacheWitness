@@ -45,7 +45,7 @@ test('unarmed sync point returns at once', async () => {
 test('armed sync point holds exactly one call until released', async () => {
   const r = runner(process.env.CAWIT_SYNC_URL);
   const token = `t${Date.now()}`;
-  await r.cmd('SET', 'cawit:arm:test:point', `${token}|*`, 'PX', '30000');
+  await r.cmd('SET', 'cawit:arm:test:point', `${token}|hold|*`, 'PX', '30000');
   let done1 = false;
   const p1 = hook.syncPoint('test:point', 'k1').then(() => { done1 = true; });
   const reached = await r.cmd('BLPOP', `cawit:reached:${token}`, '5');
@@ -62,13 +62,24 @@ test('armed sync point holds exactly one call until released', async () => {
 test('key filter: a different key passes and leaves the arm in place', async () => {
   const r = runner(process.env.CAWIT_SYNC_URL);
   const token = `t${Date.now()}x`;
-  await r.cmd('SET', 'cawit:arm:test:keyed', `${token}|wanted`, 'PX', '30000');
+  await r.cmd('SET', 'cawit:arm:test:keyed', `${token}|hold|wanted`, 'PX', '30000');
   await hook.syncPoint('test:keyed', 'other');
-  assert.strictEqual(await r.cmd('GET', 'cawit:arm:test:keyed'), `${token}|wanted`);
+  assert.strictEqual(await r.cmd('GET', 'cawit:arm:test:keyed'), `${token}|hold|wanted`);
   const p = hook.syncPoint('test:keyed', 'wanted');
   assert.ok(await r.cmd('BLPOP', `cawit:reached:${token}`, '5'));
   await r.cmd('RPUSH', `cawit:release:${token}`, 'go');
   await p;
+  r.close();
+});
+
+test('action fail: signals reached, then throws once', async () => {
+  const r = runner(process.env.CAWIT_SYNC_URL);
+  const token = `t${Date.now()}f`;
+  await r.cmd('SET', 'cawit:arm:test:fail', `${token}|fail|k`, 'PX', '30000');
+  await assert.rejects(hook.syncPoint('test:fail', 'k'), hook.CawitInjectedError);
+  const reached = await r.cmd('BLPOP', `cawit:reached:${token}`, '1');
+  assert.strictEqual(JSON.parse(reached[1]).action, 'fail');
+  await hook.syncPoint('test:fail', 'k'); // consumed: no second failure
   r.close();
 });
 

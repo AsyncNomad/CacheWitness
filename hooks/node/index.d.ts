@@ -7,6 +7,13 @@
  */
 export declare function syncPoint(point: string, key?: string): Promise<void>;
 
+/**
+ * Thrown by syncPoint when the scenario armed the point with action `fail`
+ * (fault injection): place the call right before the operation that should
+ * fail, e.g. a cache invalidation.
+ */
+export declare class CawitInjectedError extends Error {}
+
 /** Close the hook's dedicated Redis connection (tests, graceful shutdown). */
 export declare function close(): void;
 

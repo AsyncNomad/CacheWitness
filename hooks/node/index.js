@@ -5,8 +5,10 @@
 // when NODE_ENV=production unless CAWIT_ALLOW_PRODUCTION=1 (a second guard
 // against a stray CAWIT_SYNC_URL in production). When a
 // scenario has armed `point`, the first call to reach it takes the arm
-// (atomically, so only one call is held), signals cawit:reached:<token>, and waits
-// on cawit:release:<token>. The hook uses its own Redis connection: BLPOP
+// (atomically, so only one call is taken) and signals cawit:reached:<token>.
+// Armed with action `hold`, it then waits on cawit:release:<token>; with
+// action `fail`, it throws CawitInjectedError, so a call placed before an
+// operation (e.g. a cache invalidation) makes that operation fail. The hook uses its own Redis connection: BLPOP
 // blocks the connection, and blocking the app's cache connection would delay
 // unrelated commands.
 const net = require('net');
@@ -100,22 +102,36 @@ function connection() {
 
 // Take the arm only if it is for this key (or any key), in one step: a
 // GETDEL-then-put-back would leave a gap in which the intended caller finds
-// no arm.
+// no arm. Arm value (protocol v2): <token>|<action>|<key or *>; returns
+// {token, action} or nil.
 const TAKE = `
 local v = redis.call('GET', KEYS[1])
 if not v then return false end
-local sep = string.find(v, '|', 1, true)
-local want = sep and string.sub(v, sep + 1) or '*'
+local s1 = string.find(v, '|', 1, true)
+if not s1 then return false end
+local s2 = string.find(v, '|', s1 + 1, true)
+if not s2 then return false end
+local want = string.sub(v, s2 + 1)
 if want ~= '*' and want ~= ARGV[1] then return false end
 redis.call('DEL', KEYS[1])
-return sep and string.sub(v, 1, sep - 1) or v`;
+return {string.sub(v, 1, s1 - 1), string.sub(v, s1 + 1, s2 - 1)}`;
+
+/** Thrown by syncPoint when a scenario armed the point with action `fail`. */
+class CawitInjectedError extends Error {
+  constructor(point, key) {
+    super(`cawit: injected failure at ${point} (${key})`);
+    this.name = 'CawitInjectedError';
+  }
+}
 
 async function syncPoint(point, key = '*') {
   if (!ENABLED) return;
   const c = connection();
-  const token = await c.cmd('EVAL', TAKE, '1', `cawit:arm:${point}`, key);
-  if (token === null) return;
-  await c.cmd('RPUSH', `cawit:reached:${token}`, JSON.stringify({ point, key, pid: process.pid }));
+  const taken = await c.cmd('EVAL', TAKE, '1', `cawit:arm:${point}`, key);
+  if (taken === null) return;
+  const [token, action] = taken;
+  await c.cmd('RPUSH', `cawit:reached:${token}`, JSON.stringify({ point, key, action, pid: process.pid }));
+  if (action === 'fail') throw new CawitInjectedError(point, key);
   const released = await c.cmd('BLPOP', `cawit:release:${token}`, String(TIMEOUT_S));
   if (released === null) await c.cmd('RPUSH', `cawit:timeout:${token}`, String(process.pid));
 }
@@ -127,4 +143,4 @@ function close() {
   }
 }
 
-module.exports = { syncPoint, close, enabled: ENABLED, _parse: parse };
+module.exports = { syncPoint, close, enabled: ENABLED, CawitInjectedError, _parse: parse };

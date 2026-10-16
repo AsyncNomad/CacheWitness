@@ -114,6 +114,10 @@ struct HttpStep {
     /// Run in the background under this name; `await` collects it.
     #[serde(default, rename = "async")]
     background: Option<String>,
+    /// The request is expected to fail (e.g. under an injected fault): an
+    /// error response does not end the run.
+    #[serde(default)]
+    allow_error: bool,
 }
 
 /// A rendered request, ready to send (owned, so it can run in a background task).
@@ -172,7 +176,14 @@ impl Step for HttpStep {
     }
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>> {
         Box::pin(async move {
-            let fut = prepare(ctx, &self.app, &self.request, &self.vars)?.send();
+            let send = prepare(ctx, &self.app, &self.request, &self.vars)?.send();
+            let allow_error = self.allow_error;
+            let fut = async move {
+                match send.await {
+                    Err(e) if allow_error => Ok(http::Response { status: 0, headers: Vec::new(), body: format!("{e:#}").into_bytes() }),
+                    other => other,
+                }
+            };
             match &self.background {
                 Some(name) => {
                     ctx.tasks.insert(name.clone(), tokio::spawn(fut));
@@ -192,11 +203,23 @@ impl Step for HttpStep {
 #[serde(deny_unknown_fields)]
 struct ArmStep {
     point: String,
-    /// Only hold a call for this key (default: any key).
+    /// Only take a call for this key (default: any key).
     #[serde(default)]
     key: Option<String>,
+    /// What the taken call does: `hold` until released, or `fail` (the hook
+    /// throws, as if the operation at that point failed).
+    #[serde(default)]
+    action: ArmAction,
     #[serde(rename = "as")]
     alias: String,
+}
+
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ArmAction {
+    #[default]
+    Hold,
+    Fail,
 }
 
 impl Step for ArmStep {
@@ -212,7 +235,7 @@ impl Step for ArmStep {
             };
             let reply = ctx
                 .redis
-                .cmd(&["SET", &format!("cawit:arm:{}", self.point), &format!("{token}|{key}"), "PX", "30000"])
+                .cmd(&["SET", &format!("cawit:arm:{}", self.point), &arm_value(&token, self.action, &key), "PX", "30000"])
                 .await?;
             if let Frame::Error(e) = reply {
                 bail!("arming {}: {e}", self.point);
@@ -221,6 +244,16 @@ impl Step for ArmStep {
             Ok(Flow::Continue)
         })
     }
+}
+
+/// Protocol v2 arm value: `<token>|<action>|<key or *>`. The key comes last
+/// so it may contain `|`.
+fn arm_value(token: &str, action: ArmAction, key: &str) -> String {
+    let action = match action {
+        ArmAction::Hold => "hold",
+        ArmAction::Fail => "fail",
+    };
+    format!("{token}|{action}|{key}")
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,6 +348,11 @@ impl Step for SleepStep {
 struct ExpectStep {
     name: String,
     check: String,
+    /// Bounded-staleness verdict: pass if the check passes at some point
+    /// within this many ms (polled every 50 ms). Without it the verdict is
+    /// strict: the check must pass the first time it is evaluated.
+    #[serde(default)]
+    within_ms: Option<u64>,
 }
 
 impl Step for ExpectStep {
@@ -324,7 +362,16 @@ impl Step for ExpectStep {
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>> {
         Box::pin(async move {
             let check = ctx.checks.get(&self.check).with_context(|| format!("unknown check `{}`", self.check))?;
-            let r = check.eval(ctx).await?;
+            let start = tokio::time::Instant::now();
+            let mut r = check.eval(ctx).await?;
+            if let Some(limit) = self.within_ms {
+                let limit = Duration::from_millis(limit);
+                while !r.pass && start.elapsed() < limit {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    r = check.eval(ctx).await?;
+                }
+                r.detail = format!("{} (after {}ms, limit {}ms)", r.detail, start.elapsed().as_millis(), limit.as_millis());
+            }
             ctx.expectations.push(Expectation { name: self.name.clone(), check: self.check.clone(), pass: r.pass, detail: r.detail });
             Ok(Flow::Continue)
         })
@@ -346,5 +393,15 @@ mod tests {
         assert!(r.build(&two).is_err());
         let typo: serde_yaml::Value = serde_yaml::from_str("{ sleep: { msec: 1 } }").unwrap();
         assert!(r.build(&typo).is_err());
+        let fail: serde_yaml::Value = serde_yaml::from_str("{ arm: { point: p, as: f, action: fail } }").unwrap();
+        assert!(r.build(&fail).is_ok());
+        let bad_action: serde_yaml::Value = serde_yaml::from_str("{ arm: { point: p, as: f, action: explode } }").unwrap();
+        assert!(r.build(&bad_action).is_err());
+    }
+
+    #[test]
+    fn arm_value_puts_key_last() {
+        assert_eq!(arm_value("t1", ArmAction::Hold, "*"), "t1|hold|*");
+        assert_eq!(arm_value("t1", ArmAction::Fail, "a|b"), "t1|fail|a|b");
     }
 }
