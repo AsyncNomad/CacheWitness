@@ -1,16 +1,20 @@
 'use strict';
-// CacheWitness sync hook for Node (protocol v1, docs/design/verify-design.md 3).
+// CacheWitness sync hook for Node (protocol v2, docs/design/verify-design.md 3).
 //
 // syncPoint(point, key) is a no-op unless CAWIT_SYNC_URL is set, and also
 // when NODE_ENV=production unless CAWIT_ALLOW_PRODUCTION=1 (a second guard
-// against a stray CAWIT_SYNC_URL in production). When a
-// scenario has armed `point`, the first call to reach it takes the arm
-// (atomically, so only one call is taken) and signals cawit:reached:<token>.
-// Armed with action `hold`, it then waits on cawit:release:<token>; with
-// action `fail`, it throws CawitInjectedError, so a call placed before an
-// operation (e.g. a cache invalidation) makes that operation fail. The hook uses its own Redis connection: BLPOP
-// blocks the connection, and blocking the app's cache connection would delay
-// unrelated commands.
+// against a stray CAWIT_SYNC_URL in production). When a scenario has armed
+// `point`, the first call to reach it takes the arm (atomically, so only one
+// call is taken) and signals cawit:reached:<token>. Armed with action `hold`,
+// it then waits on cawit:release:<token>; with action `fail`, it throws
+// CawitInjectedError, so a call placed before an operation (e.g. a cache
+// invalidation) makes that operation fail.
+//
+// The hook never uses the app's cache connection. Non-blocking commands share
+// one hook connection; each hold waits (BLPOP) on a connection of its own, so
+// a held call never delays other sync points in the same process (a shared
+// blocking connection made a second request in the same server wait for the
+// first one's release).
 const net = require('net');
 
 const ENABLED = !!process.env.CAWIT_SYNC_URL &&
@@ -132,7 +136,13 @@ async function syncPoint(point, key = '*') {
   const [token, action] = taken;
   await c.cmd('RPUSH', `cawit:reached:${token}`, JSON.stringify({ point, key, action, pid: process.pid }));
   if (action === 'fail') throw new CawitInjectedError(point, key);
-  const released = await c.cmd('BLPOP', `cawit:release:${token}`, String(TIMEOUT_S));
+  const waiter = new Conn(process.env.CAWIT_SYNC_URL);
+  let released;
+  try {
+    released = await waiter.cmd('BLPOP', `cawit:release:${token}`, String(TIMEOUT_S));
+  } finally {
+    waiter.sock.destroy();
+  }
   if (released === null) await c.cmd('RPUSH', `cawit:timeout:${token}`, String(process.pid));
 }
 

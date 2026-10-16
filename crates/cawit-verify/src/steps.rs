@@ -298,6 +298,15 @@ impl Step for ReleaseStep {
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>> {
         Box::pin(async move {
             let armed = ctx.syncs.get(&self.sync).with_context(|| format!("`{}` was never armed", self.sync))?.clone();
+            // A hold that already timed out let the call go on its own: the
+            // order this release was meant to create did not happen.
+            let timed_out = ctx.redis.cmd(&["LLEN", &format!("cawit:timeout:{}", armed.token)]).await?;
+            if !matches!(timed_out, Frame::Integer(0)) {
+                return Ok(Flow::NotReached(format!(
+                    "the hold at `{}` timed out before release (hook CAWIT_SYNC_TIMEOUT_S); the forced order did not happen",
+                    armed.point
+                )));
+            }
             ctx.redis.cmd(&["RPUSH", &format!("cawit:release:{}", armed.token), "go"]).await?;
             Ok(Flow::Continue)
         })

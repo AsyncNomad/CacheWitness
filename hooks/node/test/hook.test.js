@@ -72,6 +72,22 @@ test('key filter: a different key passes and leaves the arm in place', async () 
   r.close();
 });
 
+test('a held call does not delay other sync points in the same process', async () => {
+  const r = runner(process.env.CAWIT_SYNC_URL);
+  const token = `t${Date.now()}h`;
+  await r.cmd('SET', 'cawit:arm:test:held', `${token}|hold|*`, 'PX', '30000');
+  const held = hook.syncPoint('test:held', 'k');
+  assert.ok(await r.cmd('BLPOP', `cawit:reached:${token}`, '5'));
+  await new Promise((res) => setTimeout(res, 100)); // let the hook enter its BLPOP
+  const t0 = Date.now();
+  await Promise.race([hook.syncPoint('test:other', 'k'), new Promise((res) => setTimeout(res, 1000))]);
+  const waited = Date.now() - t0;
+  await r.cmd('RPUSH', `cawit:release:${token}`, 'go');
+  await held;
+  r.close();
+  assert.ok(waited < 500, `an unarmed sync point waited ${waited}ms behind a held one`);
+});
+
 test('action fail: signals reached, then throws once', async () => {
   const r = runner(process.env.CAWIT_SYNC_URL);
   const token = `t${Date.now()}f`;

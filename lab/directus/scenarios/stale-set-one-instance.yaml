@@ -1,0 +1,36 @@
+# The stale-set race on a single Directus instance: the held read and the
+# newer write go through the same server (writer: a). Needs a hook that holds
+# each call on its own connection (verify-design.md 3).
+name: directus-stale-set-one-instance
+runs: 20
+apps:
+  a: http://127.0.0.1:8055
+  b: http://127.0.0.1:8056
+redis: redis://127.0.0.1:6379
+postgres: "host=127.0.0.1 user=postgres password=postgres dbname=directus"
+
+requests:
+  update:
+    method: PATCH
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+    json: { title: "${value}" }
+  read:
+    method: GET
+    path: /items/articles/1
+    headers: { authorization: "Bearer ${env.CAWIT_TOKEN}" }
+
+state:
+  db_query: "select title from articles where id = 1"
+  app_view: { app: a, request: read, field: /data/title, hit_header: x-cache-status }
+
+# The stale-set pattern (cawit verify --show-steps prints the steps it runs).
+pattern:
+  stale-set:
+    reader: a
+    writer: a
+    write: update
+    read: read
+    key: /items/articles/1
+    # a slow reader: held longer than a delayed second purge (CW_DDEL_MS=500)
+    hold_ms: 1000

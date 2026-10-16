@@ -173,6 +173,7 @@ async fn cleanup(ctx: &mut RunCtx<'_>) {
         let _ = ctx.redis.cmd(&["RPUSH", &format!("cawit:release:{}", a.token), "cleanup"]).await;
         let _ = ctx.redis.cmd(&["EXPIRE", &format!("cawit:release:{}", a.token), "60"]).await;
         let _ = ctx.redis.cmd(&["DEL", &format!("cawit:reached:{}", a.token)]).await;
+        let _ = ctx.redis.cmd(&["DEL", &format!("cawit:timeout:{}", a.token)]).await;
     }
     for (_, task) in std::mem::take(&mut ctx.tasks) {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(10), task).await;
