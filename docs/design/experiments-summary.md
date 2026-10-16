@@ -5,6 +5,8 @@
 - 0단계(프로토타입 판정의 정확도): [`phase0-results.md`](phase0-results.md)
 - 1단계(실제 앱 적합성, Twenty race 실험): [`phase1-results.md`](phase1-results.md)
 
+**이 실험들의 결과로 제품 정의를 바꿨다 (2026-10-16).** 탐지 도구에서 "캐시 동시성 버그를 순서까지 통제해 재현하고, 수정을 증명하는 테스트 도구"로 바꿨다. 근거는 결론 4·9·11이다 (PLAN 0장).
+
 모든 실험은 로컬 WSL2에서만 돌렸다. Twenty 실험은 외부 경로가 없는 docker 내부 네트워크 안에서 돌렸다(`lab/twenty/compose.yaml`). 실행 결과는 `lab/out/`에 남고 git에는 넣지 않는다.
 
 ---
