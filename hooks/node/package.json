@@ -1,0 +1,11 @@
+{
+  "name": "cawit-hook",
+  "version": "0.1.0",
+  "description": "CacheWitness sync hook: pause a cache refill at a named point so a test can force a race order",
+  "license": "Apache-2.0",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": ["index.js", "index.d.ts"],
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test test/*.test.js" }
+}

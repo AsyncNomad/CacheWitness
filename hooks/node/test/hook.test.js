@@ -1,0 +1,75 @@
+'use strict';
+// Needs a Redis at CAWIT_SYNC_URL (run inside the isolated lab namespace).
+const test = require('node:test');
+const assert = require('node:assert');
+const net = require('net');
+const hook = require('..');
+
+// A second plain connection playing the scenario runner.
+function runner(url) {
+  const m = /^redis:\/\/([^:/]+):(\d+)/.exec(url);
+  const sock = net.connect(Number(m[2]), m[1]);
+  let buf = Buffer.alloc(0);
+  const waiting = [];
+  sock.on('data', (d) => {
+    buf = Buffer.concat([buf, d]);
+    for (;;) {
+      const r = hook._parse(buf, 0);
+      if (!r) return;
+      buf = buf.subarray(r[1]);
+      waiting.shift()(r[0]);
+    }
+  });
+  const cmd = (...a) => new Promise((res) => {
+    waiting.push(res);
+    sock.write(`*${a.length}\r\n` + a.map((x) => `$${Buffer.byteLength(x)}\r\n${x}\r\n`).join(''));
+  });
+  return { cmd, close: () => sock.destroy() };
+}
+
+test('parser handles bulk, array, null, integer, error', () => {
+  assert.deepStrictEqual(hook._parse(Buffer.from('$3\r\nabc\r\n'), 0)[0], 'abc');
+  assert.deepStrictEqual(hook._parse(Buffer.from('*2\r\n$1\r\na\r\n:5\r\n'), 0)[0], ['a', 5]);
+  assert.strictEqual(hook._parse(Buffer.from('$-1\r\n'), 0)[0], null);
+  assert.strictEqual(hook._parse(Buffer.from('*-1\r\n'), 0)[0], null);
+  assert.ok(hook._parse(Buffer.from('-ERR x\r\n'), 0)[0] instanceof Error);
+  assert.strictEqual(hook._parse(Buffer.from('$3\r\nab'), 0), null);
+});
+
+test('unarmed sync point returns at once', async () => {
+  const t0 = Date.now();
+  await hook.syncPoint('test:unarmed', 'k');
+  assert.ok(Date.now() - t0 < 200);
+});
+
+test('armed sync point holds exactly one call until released', async () => {
+  const r = runner(process.env.CAWIT_SYNC_URL);
+  const token = `t${Date.now()}`;
+  await r.cmd('SET', 'cawit:arm:test:point', `${token}|*`, 'PX', '30000');
+  let done1 = false;
+  const p1 = hook.syncPoint('test:point', 'k1').then(() => { done1 = true; });
+  const reached = await r.cmd('BLPOP', `cawit:reached:${token}`, '5');
+  assert.ok(reached, 'hook signalled reached');
+  assert.strictEqual(JSON.parse(reached[1]).key, 'k1');
+  await hook.syncPoint('test:point', 'k2'); // arm consumed: passes through
+  assert.strictEqual(done1, false, 'first call still held');
+  await r.cmd('RPUSH', `cawit:release:${token}`, 'go');
+  await p1;
+  assert.strictEqual(done1, true);
+  r.close();
+});
+
+test('key filter: a different key passes and leaves the arm in place', async () => {
+  const r = runner(process.env.CAWIT_SYNC_URL);
+  const token = `t${Date.now()}x`;
+  await r.cmd('SET', 'cawit:arm:test:keyed', `${token}|wanted`, 'PX', '30000');
+  await hook.syncPoint('test:keyed', 'other');
+  assert.strictEqual(await r.cmd('GET', 'cawit:arm:test:keyed'), `${token}|wanted`);
+  const p = hook.syncPoint('test:keyed', 'wanted');
+  assert.ok(await r.cmd('BLPOP', `cawit:reached:${token}`, '5'));
+  await r.cmd('RPUSH', `cawit:release:${token}`, 'go');
+  await p;
+  r.close();
+});
+
+test.after(() => hook.close());
