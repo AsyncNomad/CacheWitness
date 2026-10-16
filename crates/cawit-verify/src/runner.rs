@@ -1,5 +1,14 @@
-//! Runs a scenario several times and collects outcomes
-//! (docs/design/verify-design.md 5).
+//! Running a scenario: [`run`], its [`Options`], and the resulting [`Report`].
+//!
+//! | Outcome | When |
+//! |---|---|
+//! | [`Outcome::Pass`] | every `expect` passed |
+//! | [`Outcome::Fail`] | an `expect` failed |
+//! | [`Outcome::NotReached`] | a sync point was not reached in time, or a hold timed out before release: the forced order did not happen, so the run is discarded |
+//! | [`Outcome::Error`] | a request or step failed; the run is discarded |
+//!
+//! [`Report::exit_code`] maps these to `0` (all passed), `1` (any failed),
+//! and `2` (no failure, but runs were discarded).
 
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -8,14 +17,18 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::checks;
+use crate::patterns;
 use crate::scenario::Scenario;
 use crate::steps::{self, Expectation, Flow, RunCtx, Step};
 use crate::template::Vars;
 
+/// How a run ended. Serialized as `PASS`, `FAIL`, `NOT_REACHED`, `ERROR`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Outcome {
+    /// Every expectation passed.
     Pass,
+    /// At least one expectation failed.
     Fail,
     /// The forced order did not happen; the run is discarded.
     NotReached,
@@ -23,27 +36,38 @@ pub enum Outcome {
     Error,
 }
 
+/// The result of one run.
 #[derive(Debug, Clone, Serialize)]
 pub struct RunResult {
+    /// Run number, from 1.
     pub run: u32,
+    /// How the run ended.
     pub outcome: Outcome,
+    /// The `expect` steps evaluated before the run ended, in order.
     pub expectations: Vec<Expectation>,
+    /// Why the run ended early (`NotReached`, `Error`); `None` otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
 
+/// Results of all runs of a scenario. Serializes to the JSON written by
+/// `cawit verify --out`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
+    /// The scenario's `name`.
     pub scenario: String,
+    /// One entry per run, in order.
     pub runs: Vec<RunResult>,
 }
 
 impl Report {
+    /// Number of runs with outcome `o`.
     pub fn count(&self, o: Outcome) -> usize {
         self.runs.iter().filter(|r| r.outcome == o).count()
     }
 
-    /// 0 all passed, 1 any failure, 2 no failure but some runs discarded.
+    /// Process exit code: `0` all runs passed, `1` any run failed, `2` no run
+    /// failed but some were discarded (or there were no runs).
     pub fn exit_code(&self) -> i32 {
         if self.count(Outcome::Fail) > 0 {
             1
@@ -99,18 +123,51 @@ impl Report {
     }
 }
 
+/// How to run a scenario: the number of runs and the registries that turn
+/// YAML into steps, checks, and pattern expansions.
+///
+/// [`Options::default`] uses the built-in registries. Register your own step
+/// kinds, checks, or patterns on these registries before calling [`run`].
 pub struct Options {
+    /// Number of runs; `None` uses the scenario's `runs`.
     pub runs: Option<u32>,
+    /// Step kinds available to the scenario.
+    pub steps: steps::Registry,
+    /// Checks available to `expect` steps.
+    pub checks: checks::Registry,
+    /// Patterns available to `pattern:`.
+    pub patterns: patterns::Registry,
 }
 
+impl Default for Options {
+    fn default() -> Options {
+        Options {
+            runs: None,
+            steps: steps::Registry::builtin(),
+            checks: checks::Registry::builtin(),
+            patterns: patterns::Registry::builtin(),
+        }
+    }
+}
+
+/// Run `scenario` and collect a [`Report`].
+///
+/// Steps are built once, before the first run, so a scenario error (unknown
+/// step kind, bad parameters, unknown pattern) fails fast with `Err`. Each run
+/// then gets a fresh Redis connection and run variables (`run`, `run_index`),
+/// executes the steps in order, and ends with cleanup: armed sync points are
+/// disarmed, held calls are released, and background requests are awaited (up
+/// to 10 s). `on_run` is called after each run, for progress output.
+///
+/// Failures inside a run become an [`Outcome`] (`Error`, `NotReached`), not an
+/// `Err`. `Err` is returned only when the scenario cannot run at all: it does
+/// not build, or PostgreSQL or Redis cannot be reached.
 pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&RunResult)) -> Result<Report> {
-    let registry = steps::Registry::builtin();
-    let check_registry = checks::Registry::builtin();
     let steps: Vec<Box<dyn Step>> = scenario
-        .resolved_steps()?
+        .resolved_steps_with(&opts.patterns)?
         .iter()
         .enumerate()
-        .map(|(i, v)| registry.build(v).with_context(|| format!("step {}", i + 1)))
+        .map(|(i, v)| opts.steps.build(v).with_context(|| format!("step {}", i + 1)))
         .collect::<Result<_>>()?;
 
     let pg = match &scenario.postgres {
@@ -138,7 +195,7 @@ pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&Ru
         vars.insert("run_index".into(), i.to_string());
         let mut ctx = RunCtx {
             scenario,
-            checks: &check_registry,
+            checks: &opts.checks,
             vars,
             redis,
             pg: pg.as_ref(),

@@ -1,5 +1,48 @@
-//! Scenario steps. Each step kind is built from YAML by a [`Registry`]
-//! builder; add kinds with [`Registry::register`] without touching the runner.
+//! Scenario steps and the [`Registry`] that builds them from YAML.
+//!
+//! A step in a scenario is a one-key mapping, `{ <kind>: <params> }`. The
+//! built-in kinds are:
+//!
+//! | Kind | Parameters | Does |
+//! |---|---|---|
+//! | `http` | `app`, `request`, `vars`, `async`, `allow_error` | Send a request; with `async`, in the background |
+//! | `arm` | `point`, `key`, `action` (`hold` or `fail`), `as` | Arm a sync point for one call |
+//! | `reached` | `sync`, `timeout_ms` (10000) | Wait for the armed call; `NotReached` if it does not come |
+//! | `release` | `sync` | Release a held call; `NotReached` if the hold already timed out |
+//! | `await` | `task` | Wait for a background request |
+//! | `sleep` | `ms` | Wait |
+//! | `expect` | `name`, `check`, `within_ms` | Evaluate a check |
+//!
+//! # Adding a step kind
+//!
+//! Implement [`Step`] and register a builder that turns the step's YAML
+//! parameters into it:
+//!
+//! ```no_run
+//! use cawit_verify::runner::Options;
+//! use cawit_verify::steps::{BoxFut, Flow, RunCtx, Step};
+//!
+//! /// `{ redis: { cmd: [DEL, "app:article:1"] } }`: send one Redis command.
+//! #[derive(serde::Deserialize)]
+//! struct RedisCmd {
+//!     cmd: Vec<String>,
+//! }
+//!
+//! impl Step for RedisCmd {
+//!     fn kind(&self) -> &'static str {
+//!         "redis"
+//!     }
+//!     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, anyhow::Result<Flow>> {
+//!         Box::pin(async move {
+//!             ctx.redis.cmd(&self.cmd).await?;
+//!             Ok(Flow::Continue)
+//!         })
+//!     }
+//! }
+//!
+//! let mut opts = Options::default();
+//! opts.steps.register("redis", |params| Ok(Box::new(serde_yaml::from_value::<RedisCmd>(params)?)));
+//! ```
 
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -17,11 +60,13 @@ use crate::http;
 use crate::scenario::Scenario;
 use crate::template::{Vars, render, render_json};
 
+/// A boxed, `Send` future: what [`Step::run`] and [`crate::checks::Check::eval`] return.
 pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// What the runner does after a step.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Flow {
+    /// Go on with the next step.
     Continue,
     /// A sync point was not reached: the forced order did not happen and the
     /// run proves nothing (manipulation check).
@@ -31,38 +76,59 @@ pub enum Flow {
 /// Result of one `expect` step.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Expectation {
+    /// The step's `name`, e.g. `not_stale`.
     pub name: String,
+    /// The check that was evaluated, e.g. `app_equals_db`.
     pub check: String,
+    /// Whether it passed.
     pub pass: bool,
+    /// What was compared, e.g. `served=... (cache hit) db=...`.
     pub detail: String,
 }
 
 /// An armed sync point, remembered so the run can clean it up.
 #[derive(Debug, Clone)]
 pub struct Armed {
+    /// Sync point name.
     pub point: String,
+    /// Token for this run's protocol keys (`cawit:reached:<token>`, ...).
     pub token: String,
 }
 
-/// Per-run state shared by steps.
+/// Per-run state shared by steps and checks. A fresh one is made for each run.
 pub struct RunCtx<'s> {
+    /// The scenario being run.
     pub scenario: &'s Scenario,
+    /// Checks available to `expect`.
     pub checks: &'s checks::Registry,
+    /// Run variables (`run`, `run_index`) for templates.
     pub vars: Vars,
+    /// This run's Redis connection (protocol commands, cache reads).
     pub redis: cawit_resp::Client,
+    /// PostgreSQL connection, if the scenario names one.
     pub pg: Option<&'s tokio_postgres::Client>,
+    /// Armed sync points by alias (`as`).
     pub syncs: BTreeMap<String, Armed>,
+    /// Background requests by name (`async`).
     pub tasks: BTreeMap<String, JoinHandle<Result<http::Response>>>,
+    /// Results of `expect` steps so far.
     pub expectations: Vec<Expectation>,
 }
 
+/// One step of a scenario. See the [module documentation](self) for an example.
 pub trait Step: Send + Sync {
+    /// The step kind, as written in YAML (used in error messages).
     fn kind(&self) -> &'static str;
+    /// Run the step. Return `Err` to end the run as `ERROR`, or
+    /// `Ok(Flow::NotReached(..))` to discard it because the forced order did
+    /// not happen.
     fn run<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<Flow>>;
 }
 
-type Builder = fn(serde_yaml::Value) -> Result<Box<dyn Step>>;
+/// Builds a step from its YAML parameters (the value under the kind key).
+pub type Builder = fn(serde_yaml::Value) -> Result<Box<dyn Step>>;
 
+/// Step kinds by name.
 pub struct Registry {
     builders: HashMap<&'static str, Builder>,
 }
@@ -85,6 +151,7 @@ impl Registry {
         r
     }
 
+    /// Add or replace a step kind.
     pub fn register(&mut self, kind: &'static str, builder: Builder) {
         self.builders.insert(kind, builder);
     }
@@ -121,6 +188,7 @@ struct HttpStep {
 }
 
 /// A rendered request, ready to send (owned, so it can run in a background task).
+/// Made by [`prepare`].
 pub struct Prepared {
     base: String,
     method: String,

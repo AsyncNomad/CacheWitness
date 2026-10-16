@@ -1,4 +1,14 @@
-//! `cawit` command line.
+//! `cawit`: the [CacheWitness](https://github.com/AsyncNomad/CacheWitness) command line.
+//!
+//! ```text
+//! cawit verify <scenario.yaml> [--runs N] [--out report.json] [--junit report.xml]
+//! cawit verify <scenario.yaml> --show-steps
+//! ```
+//!
+//! `verify` runs the scenario, prints each run and a summary, and exits with
+//! `0` (every run passed), `1` (a run failed), or `2` (inconclusive: runs were
+//! discarded, or the scenario could not run). The engine is the
+//! [`cawit_verify`] crate.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -65,7 +75,15 @@ fn show_steps(scenario: PathBuf) -> Result<i32> {
 
 async fn verify(scenario: PathBuf, runs: Option<u32>, out: Option<PathBuf>, junit: Option<PathBuf>) -> Result<i32> {
     let sc = cawit_verify::Scenario::load(&scenario)?;
-    let report = cawit_verify::run(&sc, &Options { runs }, print_run).await?;
+    let report = cawit_verify::run(
+        &sc,
+        &Options {
+            runs,
+            ..Options::default()
+        },
+        print_run,
+    )
+    .await?;
     let mut per_check: Vec<(String, usize, usize)> = Vec::new();
     for r in report.runs.iter().filter(|r| matches!(r.outcome, Outcome::Pass | Outcome::Fail)) {
         for e in &r.expectations {

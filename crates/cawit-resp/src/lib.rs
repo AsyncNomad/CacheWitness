@@ -1,10 +1,36 @@
-//! Minimal RESP2/RESP3 support for CacheWitness.
+//! Minimal RESP2/RESP3 support for [CacheWitness](https://github.com/AsyncNomad/CacheWitness).
 //!
-//! [`parse`] is an incremental parser over a byte buffer; [`encode`] writes a
-//! command as an array of bulk strings; [`Client`] is a small async client
-//! that sends one command at a time. It is enough for the verify runner's
-//! sync protocol (docs/design/verify-design.md 3) and is the parser the
-//! observation engine will share.
+//! - [`parse`] is an incremental parser over a byte buffer: it returns the
+//!   first complete frame and how many bytes it used, or `None` when more
+//!   bytes are needed.
+//! - [`encode`] writes a command as a RESP array of bulk strings.
+//! - [`Client`] is a small async client that sends one command at a time.
+//!
+//! It is deliberately small: no pooling, no pipelining, no pub/sub, no TLS,
+//! no cluster support. It is what the CacheWitness runner needs for the hook
+//! protocol. For a general Redis client use `redis` or `fred`.
+//!
+//! # Example
+//!
+//! ```
+//! use cawit_resp::{Frame, encode, parse};
+//!
+//! assert_eq!(encode(&["GET", "k"]), b"*2\r\n$3\r\nGET\r\n$1\r\nk\r\n");
+//!
+//! // A complete bulk string, followed by the start of the next reply.
+//! let buf = b"$5\r\nhello\r\n:4";
+//! let (frame, used) = parse(buf).unwrap().unwrap();
+//! assert_eq!(frame.as_str().as_deref(), Some("hello"));
+//! assert_eq!(used, 11);
+//! assert_eq!(parse(&buf[used..]).unwrap(), None); // incomplete
+//! ```
+//!
+//! RESP3 types are folded into the RESP2 shapes: maps and sets become
+//! [`Frame::Array`] (a map as alternating keys and values), doubles, booleans
+//! and big numbers become [`Frame::Simple`], verbatim strings become
+//! [`Frame::Bulk`], and attributes are skipped.
+
+#![warn(missing_docs)]
 
 use std::io;
 
@@ -14,12 +40,19 @@ use tokio::net::TcpStream;
 /// A reply from Redis.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
+    /// Simple string (`+`); also RESP3 doubles, booleans, and big numbers.
     Simple(String),
+    /// Error reply (`-`, or RESP3 bulk error `!`).
     Error(String),
+    /// Integer (`:`).
     Integer(i64),
+    /// Bulk string (`$`, or RESP3 verbatim `=`); `None` is the RESP2 null bulk string.
     Bulk(Option<Vec<u8>>),
+    /// Array (`*`), or RESP3 set or map; `None` is the RESP2 null array.
     Array(Option<Vec<Frame>>),
+    /// RESP3 null (`_`).
     Null,
+    /// RESP3 push message (`>`).
     Push(Vec<Frame>),
 }
 
@@ -33,17 +66,29 @@ impl Frame {
         }
     }
 
+    /// Whether this is any form of null: RESP3 null, null bulk string, or null array.
     pub fn is_nil(&self) -> bool {
         matches!(self, Frame::Null | Frame::Bulk(None) | Frame::Array(None))
     }
 }
 
-/// Error for bytes that are not RESP.
+/// Error for bytes that are not RESP. The string describes what was wrong.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProtocolError(pub String);
 
+impl std::fmt::Display for ProtocolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RESP protocol error: {}", self.0)
+    }
+}
+
+impl std::error::Error for ProtocolError {}
+
 /// Parse one frame from the start of `buf`.
-/// `Ok(Some((frame, used)))` when complete, `Ok(None)` when more bytes are needed.
+///
+/// Returns `Ok(Some((frame, used)))` when a complete frame is available,
+/// `Ok(None)` when more bytes are needed, and `Err` when the bytes are not
+/// RESP. Nothing is consumed: drop the first `used` bytes yourself.
 pub fn parse(buf: &[u8]) -> Result<Option<(Frame, usize)>, ProtocolError> {
     parse_at(buf, 0)
 }
@@ -125,7 +170,8 @@ fn parse_at(buf: &[u8], pos: usize) -> Result<Option<(Frame, usize)>, ProtocolEr
     Ok(Some(frame))
 }
 
-/// Encode a command as a RESP array of bulk strings.
+/// Encode a command as a RESP array of bulk strings, the form Redis expects
+/// from clients.
 pub fn encode<A: AsRef<[u8]>>(args: &[A]) -> Vec<u8> {
     let mut out = format!("*{}\r\n", args.len()).into_bytes();
     for a in args {
@@ -137,14 +183,27 @@ pub fn encode<A: AsRef<[u8]>>(args: &[A]) -> Vec<u8> {
     out
 }
 
-/// A small async Redis client: one command in flight at a time.
+/// A small async Redis client: one connection, one command in flight at a time.
+///
+/// ```no_run
+/// # async fn demo() -> std::io::Result<()> {
+/// use cawit_resp::{Client, Frame};
+///
+/// let mut redis = Client::connect("redis://127.0.0.1:6379/0").await?;
+/// redis.cmd(&["SET", "k", "v"]).await?;
+/// assert_eq!(redis.cmd(&["GET", "k"]).await?, Frame::Bulk(Some(b"v".to_vec())));
+/// # Ok(())
+/// # }
+/// ```
 pub struct Client {
     stream: TcpStream,
     buf: Vec<u8>,
 }
 
 impl Client {
-    /// Connect to `redis://host:port[/db]`.
+    /// Connect to `redis://host[:port][/db]` (port 6379 by default) and select
+    /// `db` if it is not 0. A `user:password@` part is accepted but ignored:
+    /// the client does not authenticate.
     pub async fn connect(url: &str) -> io::Result<Client> {
         let rest = url
             .strip_prefix("redis://")

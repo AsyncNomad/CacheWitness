@@ -6,21 +6,29 @@ use anyhow::{Context, Result, bail};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+/// An HTTP response.
 #[derive(Debug, Clone)]
 pub struct Response {
+    /// Status code. `0` marks a request that failed and was allowed to
+    /// (`allow_error`); the body then holds the error message.
     pub status: u16,
     /// Header names in lower case, in the order received.
     pub headers: Vec<(String, String)>,
+    /// Body, with chunked transfer encoding removed.
     pub body: Vec<u8>,
 }
 
 impl Response {
+    /// The first header named `name` (case-insensitive).
     pub fn header(&self, name: &str) -> Option<&str> {
         let name = name.to_ascii_lowercase();
         self.headers.iter().find(|(k, _)| *k == name).map(|(_, v)| v.as_str())
     }
 }
 
+/// Send one request to `base` (`http://host:port`) and read the whole
+/// response. `Host`, `Connection: close`, and `Content-Length` are added.
+/// Status codes are not interpreted here.
 pub async fn request(base: &str, method: &str, path: &str, headers: &[(String, String)], body: Option<Vec<u8>>) -> Result<Response> {
     let hostport = base
         .strip_prefix("http://")

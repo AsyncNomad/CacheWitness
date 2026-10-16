@@ -1,7 +1,42 @@
-//! Built-in race patterns. A scenario names one (`pattern: { stale-set: {...} }`)
-//! instead of listing steps; the pattern expands into ordinary steps, so
-//! everything a pattern does can also be written by hand. Add patterns with
-//! [`Registry::register`].
+//! Race patterns: named recipes that expand into ordinary steps.
+//!
+//! A scenario names one (`pattern: { stale-set: {...} }`) instead of listing
+//! steps. Because a pattern only produces steps, everything it does can also
+//! be written by hand, and `cawit verify --show-steps` prints the expansion.
+//!
+//! | Pattern | Race | Hook point |
+//! |---|---|---|
+//! | `stale-set` | a reader refills with a row read before a newer write committed and invalidated | `refill:after-read`, between the database read and the cache write |
+//! | `failed-invalidation` | a write commits but its invalidation fails once | `invalidate:before`, right before the invalidation (armed to fail) |
+//! | `invalidate-before-commit` | a write invalidates inside its transaction; a reader refills before the commit | `write:before-commit`, at the end of the transaction |
+//!
+//! All built-in patterns end with `not_stale` and `refilled` expectations,
+//! using the `app_*` checks when `state.app_view` is set and the `cache_*`
+//! checks otherwise. Parameters are listed in the
+//! [scenario reference](https://github.com/AsyncNomad/CacheWitness/blob/main/docs/scenarios.md#patterns).
+//!
+//! # Adding a pattern
+//!
+//! ```
+//! use cawit_verify::patterns::Registry;
+//! use cawit_verify::Scenario;
+//!
+//! // `{ read-twice: { app: a, read: read } }`: read twice, then expect.
+//! fn read_twice(_sc: &Scenario, p: serde_yaml::Value) -> anyhow::Result<Vec<serde_yaml::Value>> {
+//!     let app = p["app"].as_str().unwrap_or("a").to_string();
+//!     let read = p["read"].as_str().unwrap_or("read").to_string();
+//!     let step = format!("{{ http: {{ app: {app}, request: {read} }} }}");
+//!     Ok(vec![
+//!         serde_yaml::from_str(&step)?,
+//!         serde_yaml::from_str(&step)?,
+//!         serde_yaml::from_str("{ expect: { name: fresh, check: app_equals_db } }")?,
+//!     ])
+//! }
+//!
+//! let mut patterns = Registry::builtin();
+//! patterns.register("read-twice", read_twice);
+//! // pass it to the runner with `Options { patterns, ..Options::default() }`
+//! ```
 
 use std::collections::HashMap;
 
@@ -12,13 +47,17 @@ use serde_yaml::{Mapping, Value};
 
 use crate::scenario::Scenario;
 
-type Expander = fn(&Scenario, Value) -> Result<Vec<Value>>;
+/// Expands a pattern's YAML parameters into steps. Gets the scenario so it
+/// can choose checks from `state`.
+pub type Expander = fn(&Scenario, Value) -> Result<Vec<Value>>;
 
+/// Patterns by name.
 pub struct Registry {
     patterns: HashMap<&'static str, Expander>,
 }
 
 impl Registry {
+    /// The built-in patterns: `stale-set`, `failed-invalidation`, `invalidate-before-commit`.
     pub fn builtin() -> Registry {
         let mut r = Registry { patterns: HashMap::new() };
         r.register("stale-set", stale_set);
@@ -27,6 +66,7 @@ impl Registry {
         r
     }
 
+    /// Add or replace a pattern.
     pub fn register(&mut self, name: &'static str, expand: Expander) {
         self.patterns.insert(name, expand);
     }

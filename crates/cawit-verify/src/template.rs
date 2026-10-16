@@ -6,8 +6,22 @@ use std::collections::BTreeMap;
 use anyhow::{Result, bail};
 use serde_json::Value;
 
+/// Variables available to a template: run variables (`run`, `run_index`)
+/// plus a step's `vars`.
 pub type Vars = BTreeMap<String, String>;
 
+/// Replace every `${name}` in `s`. `${env.X}` reads environment variable `X`;
+/// other names come from `vars`. Unknown names and unset environment
+/// variables are errors, so a typo never sends a literal `${...}`.
+///
+/// ```
+/// use cawit_verify::template::{Vars, render};
+///
+/// let mut vars = Vars::new();
+/// vars.insert("run".into(), "abc-1".into());
+/// assert_eq!(render("title ${run}-a", &vars).unwrap(), "title abc-1-a");
+/// assert!(render("${nope}", &vars).is_err());
+/// ```
 pub fn render(s: &str, vars: &Vars) -> Result<String> {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;

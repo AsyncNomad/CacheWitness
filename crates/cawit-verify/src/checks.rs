@@ -1,6 +1,39 @@
-//! Verdict checks used by `expect` steps. Each compares the cache entry
-//! named in the scenario's `state` with the database. Register more with
-//! [`Registry::register`].
+//! Checks: the verdicts evaluated by `expect` steps.
+//!
+//! | Check | Reads | Passes when |
+//! |---|---|---|
+//! | `cache_not_stale` | `state.cache_key` | the entry is absent or equals the database |
+//! | `cache_equals_db` | `state.cache_key` | the entry exists and equals the database |
+//! | `cache_absent` | `state.cache_key` | the entry is absent |
+//! | `app_equals_db` | `state.app_view` | what the application serves equals the database |
+//! | `app_cached_equals_db` | `state.app_view` | that, and the response was a cache hit (`hit_header`) |
+//!
+//! The database value is the first column of the first row of
+//! `state.db_query`, as text.
+//!
+//! # Adding a check
+//!
+//! ```no_run
+//! use cawit_verify::checks::{Check, CheckResult, observe};
+//! use cawit_verify::runner::Options;
+//! use cawit_verify::steps::{BoxFut, RunCtx};
+//!
+//! /// Passes when the cache entry is absent or holds valid JSON.
+//! struct CacheIsJson;
+//!
+//! impl Check for CacheIsJson {
+//!     fn eval<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, anyhow::Result<CheckResult>> {
+//!         Box::pin(async move {
+//!             let (cache, _db) = observe(ctx).await?;
+//!             let pass = cache.as_deref().is_none_or(|v| serde_json::from_str::<serde_json::Value>(v).is_ok());
+//!             Ok(CheckResult { pass, detail: format!("cache={cache:?}") })
+//!         })
+//!     }
+//! }
+//!
+//! let mut opts = Options::default();
+//! opts.checks.register("cache_is_json", Box::new(CacheIsJson));
+//! ```
 
 use std::collections::HashMap;
 
@@ -9,15 +42,21 @@ use cawit_resp::Frame;
 
 use crate::steps::{BoxFut, RunCtx};
 
+/// The result of evaluating a check.
 pub struct CheckResult {
+    /// Whether the check passed.
     pub pass: bool,
+    /// What was compared, shown in output and reports.
     pub detail: String,
 }
 
+/// A verdict. See the [module documentation](self) for an example.
 pub trait Check: Send + Sync {
+    /// Evaluate against the current state. `Err` ends the run as `ERROR`.
     fn eval<'a>(&'a self, ctx: &'a mut RunCtx<'_>) -> BoxFut<'a, Result<CheckResult>>;
 }
 
+/// Checks by name.
 pub struct Registry {
     checks: HashMap<&'static str, Box<dyn Check>>,
 }
@@ -41,16 +80,19 @@ impl Registry {
         r
     }
 
+    /// Add or replace a check.
     pub fn register(&mut self, name: &'static str, check: Box<dyn Check>) {
         self.checks.insert(name, check);
     }
 
+    /// Look up a check by name.
     pub fn get(&self, name: &str) -> Option<&dyn Check> {
         self.checks.get(name).map(|b| b.as_ref())
     }
 }
 
-/// Cache value (None if absent) and database value as text.
+/// The cache entry `state.cache_key` (its `cache_field` if set; `None` if
+/// absent) and the database value, as text.
 pub async fn observe(ctx: &mut RunCtx<'_>) -> Result<(Option<String>, String)> {
     let state = ctx
         .scenario
