@@ -24,7 +24,11 @@ pub struct Scenario {
     #[serde(default)]
     pub state: Option<StateSpec>,
     /// Each step is a one-key mapping: `{ <kind>: <params> }`.
+    #[serde(default)]
     pub steps: Vec<serde_yaml::Value>,
+    /// A built-in pattern, `{ <name>: <params> }`, instead of `steps`.
+    #[serde(default)]
+    pub pattern: Option<serde_yaml::Value>,
 }
 
 fn one() -> u32 {
@@ -94,6 +98,19 @@ impl Scenario {
     }
 
     pub fn parse(text: &str) -> Result<Scenario> {
-        Ok(serde_yaml::from_str(text)?)
+        let sc: Scenario = serde_yaml::from_str(text)?;
+        match (sc.steps.is_empty(), sc.pattern.is_some()) {
+            (true, false) => anyhow::bail!("a scenario needs `steps` or `pattern`"),
+            (false, true) => anyhow::bail!("a scenario has either `steps` or `pattern`, not both"),
+            _ => Ok(sc),
+        }
+    }
+
+    /// The steps to run: `steps` as written, or the expansion of `pattern`.
+    pub fn resolved_steps(&self) -> Result<Vec<serde_yaml::Value>> {
+        match &self.pattern {
+            Some(p) => crate::patterns::Registry::builtin().expand(self, p),
+            None => Ok(self.steps.clone()),
+        }
     }
 }

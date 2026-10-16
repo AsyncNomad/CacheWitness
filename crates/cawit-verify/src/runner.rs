@@ -104,7 +104,7 @@ pub async fn run(scenario: &Scenario, opts: &Options, mut on_run: impl FnMut(&Ru
     let registry = steps::Registry::builtin();
     let check_registry = checks::Registry::builtin();
     let steps: Vec<Box<dyn Step>> = scenario
-        .steps
+        .resolved_steps()?
         .iter()
         .enumerate()
         .map(|(i, v)| registry.build(v).with_context(|| format!("step {}", i + 1)))

@@ -7,6 +7,7 @@
 
 pub mod checks;
 pub mod http;
+pub mod patterns;
 pub mod runner;
 pub mod scenario;
 pub mod steps;

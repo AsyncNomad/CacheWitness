@@ -92,6 +92,8 @@ steps:
   - expect: { name: refilled, check: cache_equals_db }
 ```
 
+- **내장 패턴** (2026-10-16): 단계 대신 `pattern: { stale-set: {reader, writer, write, read, key, hold_ms, settle_ms, within_ms} }`를 쓴다. 패턴은 보통 단계로 펼쳐지므로(`cawit verify --show-steps`로 확인) 패턴이 하는 일은 모두 손으로도 쓸 수 있다. 판정은 `state.app_view`가 있으면 앱을 거쳐(`app_equals_db`, `app_cached_equals_db`), 없으면 캐시 키로(`cache_not_stale`, `cache_equals_db`) 고른다. 두 대상의 시나리오를 패턴으로 바꾼 뒤 같은 결과(Twenty 4종, Directus 3종, 각 20회)를 다시 확인했다.
+- **판정 의미**: 기본은 엄격 판정(`settle_ms` 뒤 첫 판정에서 낡은 값이 없어야 함). `within_ms`를 주면 그 시간 안에 사라지면 통과하는 상한 판정이다. 지연 이중 삭제처럼 "잠깐 낡는" 수정은 엄격 판정에서 실패하고, 상한이 지연보다 길면 통과한다. 어느 쪽이 맞는지는 서비스가 정한다.
 - **단계는 레지스트리로 확장한다.** `http`, `arm`, `reached`, `release`, `await`, `sleep`, `expect`가 기본이다. 새 단계(SQL 실행, Redis 명령 등)는 코어를 고치지 않고 등록한다 (PLAN 6.2 원칙 7).
 - **판정 검사도 레지스트리다.** `cache_not_stale`(캐시가 비어 있거나 DB 값과 같음), `cache_equals_db`(캐시가 DB 값과 같음), `cache_absent`.
 - **회차 변수**: `${run}`(회차 번호와 실행 ID를 합친 고유 문자열), `${env.X}`(환경 변수), 단계 `vars`.
@@ -200,6 +202,7 @@ steps:
 - 첫 실행은 3회 모두 `NOT_REACHED`였다(조작 확인이 걸러 냄). 훅 키로 쓴 `req.path`가 하위 라우터 안에서는 마운트 경로를 뺀 `/articles/1`이었다. `req.baseUrl + req.path`로 바꿨다.
 - 패치 후 다시 빌드할 때는 `tsdown`과 `copyfiles` 둘 다 실행해야 한다(빌드 스크립트 전체). 격리 네임스페이스 안에서 `api/node_modules/.bin`으로 오프라인 실행했다.
 - 설치(`setup.sh`)는 외부 설치 스크립트 실행이라 자동 실행 권한이 막혀 관리자가 직접 실행했다.
+- **빌드 도구가 훅을 묶어 넣는 함정** (프로토콜 v2 이후): 훅을 v2로 바꾼 뒤 Directus가 20/20 `NOT_REACHED`가 됐다. Redis MONITOR로 보니 서버가 옛 v1 `EVAL`을 보내고 있었다. tsdown이 `package.json`에 선언되지 않은 `cawit-hook`을 빌드 때 `dist/` 안으로 복사해 두어, 실행 때 `node_modules`의 훅을 바꿔도 반영되지 않았다. 패치에서 `tsdown.config.ts`에 `external: ['cawit-hook']`를 넣어 고쳤다. **사용자도 겪을 함정이다**: 번들러를 쓰는 앱은 훅을 외부 의존성으로 두거나, 훅을 바꾼 뒤 다시 빌드해야 한다. 조작 확인이 걸러 내긴 했지만 원인을 알려 주지는 못했다. 훅이 연결할 때 자기 프로토콜 버전을 Redis에 남기고, 실행기가 `NOT_REACHED` 때 이를 보여 주는 진단을 이후 과제로 둔다.
 
 **2단계 관문 상태**: 두 대상(Twenty, Directus) 모두 수정 전 매번 실패, 올바른 수정 매번 통과, 틀린 수정(Twenty: vcas·리스만, Directus: 지연 이중 삭제) 판별, 훅 코드 변경 10줄 이내(4줄, 3줄)를 충족했다.
 

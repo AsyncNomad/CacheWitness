@@ -14,4 +14,5 @@ anyhow.workspace = true
 cawit-verify = { path = "../cawit-verify" }
 clap.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 tokio.workspace = true

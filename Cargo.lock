@@ -116,6 +116,7 @@ dependencies = [
  "cawit-verify",
  "clap",
  "serde_json",
+ "serde_yaml",
  "tokio",
 ]
 

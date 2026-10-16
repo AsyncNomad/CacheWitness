@@ -18,7 +18,7 @@ fn shipped_scenarios_load() {
             let path = entry.unwrap().path();
             if path.extension().is_some_and(|e| e == "yaml") {
                 let sc = Scenario::load(&path).unwrap();
-                for (i, step) in sc.steps.iter().enumerate() {
+                for (i, step) in sc.resolved_steps().unwrap().iter().enumerate() {
                     registry.build(step).unwrap_or_else(|e| panic!("{} step {}: {e:#}", path.display(), i + 1));
                 }
                 seen.push(sc.name);

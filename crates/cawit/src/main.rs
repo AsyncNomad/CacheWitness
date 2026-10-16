@@ -29,6 +29,9 @@ enum Command {
         /// Write a JUnit XML report (one test case per run) to this path.
         #[arg(long)]
         junit: Option<PathBuf>,
+        /// Print the steps the scenario runs (a pattern expanded) and exit.
+        #[arg(long)]
+        show_steps: bool,
     },
 }
 
@@ -46,6 +49,12 @@ fn print_run(r: &RunResult) {
     if let Some(n) = &r.note {
         println!("          {n}");
     }
+}
+
+fn show_steps(scenario: PathBuf) -> Result<i32> {
+    let sc = cawit_verify::Scenario::load(&scenario)?;
+    print!("{}", serde_yaml::to_string(&sc.resolved_steps()?)?);
+    Ok(0)
 }
 
 async fn verify(scenario: PathBuf, runs: Option<u32>, out: Option<PathBuf>, junit: Option<PathBuf>) -> Result<i32> {
@@ -89,7 +98,8 @@ async fn verify(scenario: PathBuf, runs: Option<u32>, out: Option<PathBuf>, juni
 async fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::Verify { scenario, runs, out, junit } => verify(scenario, runs, out, junit).await,
+        Command::Verify { scenario, show_steps: true, .. } => show_steps(scenario),
+        Command::Verify { scenario, runs, out, junit, .. } => verify(scenario, runs, out, junit).await,
     };
     match result {
         Ok(code) => ExitCode::from(code as u8),

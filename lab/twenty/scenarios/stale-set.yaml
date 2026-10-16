@@ -29,23 +29,11 @@ state:
   cache_field: displayName
   db_query: "select \"displayName\" from core.workspace where id = '20202020-1c25-4d02-bf25-6aeccf7ea419'"
 
-steps:
-  # 1. write through A: commits, invalidates, clears A's memoizer
-  - http: { app: a, request: rename, vars: { value: "${run}-a" } }
-  - sleep: { ms: 50 }
-  # 2. read through A: it misses, reads the database, and is held at the hook
-  - arm: { point: "refill:after-read", key: "workspaceEntity:20202020-1c25-4d02-bf25-6aeccf7ea419", as: refill }
-  - http: { app: a, request: read, async: held_read }
-  - reached: { sync: refill, timeout_ms: 10000 }
-  # 3. write a newer value through B: commits and invalidates
-  - http: { app: b, request: rename, vars: { value: "${run}-b" } }
-  # 4. release A, which writes what it read
-  - release: { sync: refill }
-  - await: { task: held_read }
-  - sleep: { ms: 100 }
-  # 5. the cache must not hold the old value
-  - expect: { name: not_stale, check: cache_not_stale }
-  # 6. a fix must not stop caching: one more read refills with the current value
-  - http: { app: a, request: read }
-  - sleep: { ms: 100 }
-  - expect: { name: refilled, check: cache_equals_db }
+# The stale-set pattern (cawit verify --show-steps prints the steps it runs).
+pattern:
+  stale-set:
+    reader: a
+    writer: b
+    write: rename
+    read: read
+    key: "workspaceEntity:20202020-1c25-4d02-bf25-6aeccf7ea419"
